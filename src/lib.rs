@@ -1,10 +1,10 @@
-use parity_scale_codec::{Encode, Decode, FullCodec, MaxEncodedLen};
-use scale_info::*;
 use core::fmt::Debug;
+use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
+use scale_info::*;
+use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 use std::vec::Vec;
-use schnorrkel::{
-	signing_context, ExpansionMode, MiniSecretKey, PublicKey,
-};
+
+// Fixed types:
 
 /// The context under which membership is proven. Proofs over different `Context`s are
 /// unlinkable.
@@ -14,12 +14,7 @@ pub type Alias = [u8; 32];
 /// Entropy supplied for the creation of a secret key.
 pub type Entropy = [u8; 32];
 
-pub trait Build<Member> {
-	type Intermediate: Clone + PartialEq + FullCodec;
-	fn start() -> Self::Intermediate;
-	fn push(inter: &mut Self::Intermediate, who: Member);
-	fn finish(inter: Self::Intermediate) -> Self;
-}
+// The trait. This (alone) must be implemented in its entirely by the Ring-VRF.
 
 /// Trait allowing cryptographic proof of membership of a set with known members under multiple
 /// contexts without exposing the underlying member who is proving it and giving an unlinkable
@@ -33,251 +28,330 @@ pub trait Build<Member> {
 ///
 /// A convenience `Receipt` type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
-pub trait Verifiable: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen {
-	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
-	type Members: Clone + PartialEq + FullCodec + Build<Self::Member>;
-	/// Value identifying a single member. Corresponds to the Public Key.
-	type Member: Clone + PartialEq + FullCodec + From<Self::Secret>;
-	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
-	type Secret: Clone + PartialEq + FullCodec + From<Entropy>;
+pub trait Verifiable:
+    Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen
+{
+    /// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
+    type Members: Clone + PartialEq + FullCodec;
+    /// Intermediate value while building a `Self::Members` value. Probably just an unfinished Ring
+    /// Root(?)
+    type Intermediate: Clone + PartialEq + FullCodec;
+    /// Value identifying a single member. Corresponds to the Public Key.
+    type Member: Clone + PartialEq + FullCodec;
+    /// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
+    type Secret: Clone + PartialEq + FullCodec;
 
-	/// Create a proof of membership in `members` using the given `secret` of a member. Witness
-	/// information of an iterator through the set idenfified by `members` must be provided with
-	/// `members_iter`.
-	///
-	/// The proof will be specific to a given `context` (which determines the resultant `Alias` of
-	/// the member in a way unlinkable to the member's original identifiaction and aliases in any
-	/// other contexts) together with a provided `message` which entirely at the choice of the
-	/// individual.
-	fn create<'a>(
-		secret: &Self::Secret,
-		members: &Self::Members,
-		members_iter: impl Iterator<Item = &'a Self::Member>,
-		context: &Context,
-		message: &[u8],
-	) -> Result<(Self, Alias), ()> where Self::Member: 'a;
+    /// Begin building a `Members` value.
+    fn start_members() -> Self::Intermediate;
+    /// Introduce a new `Member` into the intermediate value used to build a new `Members` value.
+    fn push_member(intermediate: &mut Self::Intermediate, who: Self::Member);
+    /// Consume the `intermediate` value to create a new `Members` value.
+    fn finish_members(inter: Self::Intermediate) -> Self::Members;
 
-	/// Check whether `self` is a valid proof of membership in `members` in the given `context`;
-	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
-	/// that they elected to opine `message`.
-	fn is_valid(
-		&self,
-		members: &Self::Members,
-		context: &Context,
-		alias: &Alias,
-		message: &[u8],
-	) -> bool;
+    /// Create a new secret from some particular `entropy`.
+    fn new_secret(entropy: Entropy) -> Self::Secret;
+
+    /// Determine the `Member` value corresponding to a given `Secret`. Basically just the
+    /// secret-to-public-key function of the crypto.
+    fn member_from_secret(secret: &Self::Secret) -> Self::Member;
+
+    /// Create a proof of membership in `members` using the given `secret` of a member. Witness
+    /// information of an iterator through the set idenfified by `members` must be provided with
+    /// `members_iter`.
+    ///
+    /// The proof will be specific to a given `context` (which determines the resultant `Alias` of
+    /// the member in a way unlinkable to the member's original identifiaction and aliases in any
+    /// other contexts) together with a provided `message` which entirely at the choice of the
+    /// individual.
+    ///
+    /// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
+    fn create<'a>(
+        secret: &Self::Secret,
+        members: &Self::Members,
+        members_iter: impl Iterator<Item = &'a Self::Member>,
+        context: &Context,
+        message: &[u8],
+    ) -> Result<(Self, Alias), ()>
+    where
+        Self::Member: 'a;
+
+    /// Check whether `self` is a valid proof of membership in `members` in the given `context`;
+    /// if so, ensure that the member is necessarily associated with `alias` in this `context` and
+    /// that they elected to opine `message`.
+    fn is_valid(
+        &self,
+        members: &Self::Members,
+        context: &Context,
+        alias: &Alias,
+        message: &[u8],
+    ) -> bool;
 }
 
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
-pub struct Receipt<Proof> {
-	proof: Proof,
-	alias: Alias,
-	message: Vec<u8>,
-}
+// Example impls:
 
-impl<Proof: Verifiable> Receipt<Proof> {
-	pub fn create<'a>(
-		secret: &Proof::Secret,
-		members: &Proof::Members,
-		members_iter: impl Iterator<Item = &'a Proof::Member>,
-		context: Context,
-		message: Vec<u8>,
-	) -> Result<Self, ()> where Proof::Member: 'a {
-		let (proof, alias) = Proof::create(secret, members, members_iter, &context, &message)?;
-		Ok(Self { proof, alias, message })
-	}
-	pub fn alias(&self) -> &Alias { &self.alias }
-	pub fn message(&self) -> &[u8] { &self.message }
-	pub fn into_parts(self) -> (Alias, Vec<u8>) {
-		(self.alias, self.message)
-	}
-	pub fn verify(self, members: &Proof::Members, context: &Context) -> Result<(Alias, Vec<u8>), Self> {
-		if self.is_valid(members, context) {
-			Ok(self.into_parts())
-		} else {
-			Err(self)
-		}
-	}
-	pub fn is_valid(&self, members: &Proof::Members, context: &Context) -> bool {
-		self.proof.is_valid(members, context, &self.alias, &self.message)
-	}
-}
-
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
-pub struct VecMembers<Member>(Vec<Member>);
-impl<Member: Clone + PartialEq + FullCodec> Build<Member> for VecMembers<Member> {
-	type Intermediate = Vec<Member>;
-	fn start() -> Self::Intermediate {
-		Vec::new()
-	}
-	fn push(inter: &mut Self::Intermediate, who: Member) {
-		inter.push(who);
-	}
-	fn finish(inter: Self::Intermediate) -> Self {
-		Self(inter)
-	}
-}
-
-// Totally insecure Anonymizer: Member and Secret are both the same `[u8; 32]` and the proof is
-// just the identity. The `alias` is always the identity and the root is just a `Vec<Self::Member>`.
-// Verification just checks that the proof and the alias are the same and that the alias exists
-// in the "root" (just a Vec).
+/// Totally insecure Anonymizer: Member and Secret are both the same `[u8; 32]` and the proof is
+/// just the identity. The `alias` is always the identity and the root is just a `Vec<Self::Member>`.
+/// Verification just checks that the proof and the alias are the same and that the alias exists
+/// in the "root" (just a Vec).
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
 pub struct Trivial([u8; 32]);
 impl Verifiable for Trivial {
-	type Members = VecMembers<Self::Member>;
-	type Member = [u8; 32];
-	type Secret = [u8; 32];
+    type Members = Vec<Self::Member>;
+    type Intermediate = Vec<Self::Member>;
+    type Member = [u8; 32];
+    type Secret = [u8; 32];
 
-	fn create<'a>(
-		secret: &Self::Secret,
-		members: &Self::Members,
-		_members_iter: impl Iterator<Item = &'a Self::Member>,
-		_context: &Context,
-		_message: &[u8],
-	) -> Result<(Self, Alias), ()> where Self::Member: 'a {
-		if !members.0.contains(&secret) { return Err(()) }
-		Ok((Self(secret.clone()), secret.clone()))
-	}
+    fn start_members() -> Self::Intermediate {
+        Vec::new()
+    }
+    fn push_member(inter: &mut Self::Intermediate, who: Self::Member) {
+        inter.push(who);
+    }
+    fn finish_members(inter: Self::Intermediate) -> Self::Members {
+        inter
+    }
 
-	fn is_valid(
-		&self,
-		members: &Self::Members,
-		_context: &Context,
-		alias: &Alias,
-		_message: &[u8],
-	) -> bool {
-		&self.0 == alias && members.0.contains(alias)
-	}
-}
+    fn new_secret(entropy: Entropy) -> Self::Secret {
+        entropy
+    }
 
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
-pub struct SchnorrkelPublic([u8; 32]);
-impl From<SchnorrkelSecret> for SchnorrkelPublic {
-	fn from(secret: SchnorrkelSecret) -> Self {
-		let secret = MiniSecretKey::from_bytes(&secret.0[..]).unwrap();
-		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
-		Self(pair.public.to_bytes())
-	}
-}
+    fn member_from_secret(secret: &Self::Secret) -> Self::Member {
+        secret.clone()
+    }
 
+    fn create<'a>(
+        secret: &Self::Secret,
+        members: &Self::Members,
+        _members_iter: impl Iterator<Item = &'a Self::Member>,
+        _context: &Context,
+        _message: &[u8],
+    ) -> Result<(Self, Alias), ()>
+    where
+        Self::Member: 'a,
+    {
+        if !members.contains(&secret) {
+            return Err(());
+        }
+        Ok((Self(secret.clone()), secret.clone()))
+    }
 
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
-pub struct SchnorrkelSecret([u8; 32]);
-impl From<Entropy> for SchnorrkelSecret {
-	fn from(entropy: [u8; 32]) -> Self {
-		Self(entropy)
-	}
+    fn is_valid(
+        &self,
+        members: &Self::Members,
+        _context: &Context,
+        alias: &Alias,
+        _message: &[u8],
+    ) -> bool {
+        &self.0 == alias && members.contains(alias)
+    }
 }
 
 const SIG_CON: &[u8] = b"verifiable";
 
+/// Example impl of `Verifiable` which uses Schnorrkel. This doesn't anonymise anything.
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
 pub struct Simple([u8; 64]);
 impl Verifiable for Simple {
-	type Members = VecMembers<Self::Member>;
-	type Member = SchnorrkelPublic;
-	type Secret = SchnorrkelSecret;
+    type Members = Vec<Self::Member>;
+    type Intermediate = Vec<Self::Member>;
+    type Member = [u8; 32];
+    type Secret = [u8; 32];
 
-	fn create<'a>(
-		secret: &Self::Secret,
-		members: &Self::Members,
-		_members_iter: impl Iterator<Item = &'a Self::Member>,
-		context: &Context,
-		message: &[u8],
-	) -> Result<(Self, Alias), ()> where Self::Member: 'a {
-		let public: SchnorrkelPublic = secret.clone().into();
-		if !members.0.contains(&public) {
-			return Err(())
-		}
+    fn start_members() -> Self::Intermediate {
+        Vec::new()
+    }
+    fn push_member(inter: &mut Self::Intermediate, who: Self::Member) {
+        inter.push(who);
+    }
+    fn finish_members(inter: Self::Intermediate) -> Self::Members {
+        inter
+    }
 
-		let secret = MiniSecretKey::from_bytes(&secret.0[..]).unwrap();
-		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
+    fn new_secret(entropy: Entropy) -> Self::Secret {
+        entropy
+    }
 
-		let sig = (context, message).using_encoded(|b|
-			pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes()
-		);
-		Ok((Self(sig), public.0))
-	}
+    fn member_from_secret(secret: &Self::Secret) -> Self::Member {
+        let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
+        let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
+        pair.public.to_bytes()
+    }
 
-	fn is_valid(
-		&self,
-		members: &Self::Members,
-		context: &Context,
-		alias: &Alias,
-		message: &[u8],
-	) -> bool {
-		if !members.0.contains(&SchnorrkelPublic(alias.clone())) {
-			return false
-		}
-		let s = schnorrkel::Signature::from_bytes(&self.0).unwrap();
-		let p = PublicKey::from_bytes(alias).unwrap();
-		(context, message).using_encoded(|b|
-			p.verify_simple(SIG_CON, b, &s).is_ok()
-		)
-	}
+    fn create<'a>(
+        secret: &Self::Secret,
+        members: &Self::Members,
+        _members_iter: impl Iterator<Item = &'a Self::Member>,
+        context: &Context,
+        message: &[u8],
+    ) -> Result<(Self, Alias), ()>
+    where
+        Self::Member: 'a,
+    {
+        let public = Self::member_from_secret(&secret);
+        if !members.contains(&public) {
+            return Err(());
+        }
+
+        let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
+        let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
+
+        let sig = (context, message)
+            .using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
+        Ok((Self(sig), public))
+    }
+
+    fn is_valid(
+        &self,
+        members: &Self::Members,
+        context: &Context,
+        alias: &Alias,
+        message: &[u8],
+    ) -> bool {
+        if !members.contains(alias) {
+            return false;
+        }
+        let s = schnorrkel::Signature::from_bytes(&self.0).unwrap();
+        let p = PublicKey::from_bytes(alias).unwrap();
+        (context, message).using_encoded(|b| p.verify_simple(SIG_CON, b, &s).is_ok())
+    }
 }
 
+// This is just a convenience struct to help manage some of the witness data. No need to look at it.
+#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
+pub struct Receipt<Proof> {
+    proof: Proof,
+    alias: Alias,
+    message: Vec<u8>,
+}
+
+impl<Proof: Verifiable> Receipt<Proof> {
+    pub fn create<'a>(
+        secret: &Proof::Secret,
+        members: &Proof::Members,
+        members_iter: impl Iterator<Item = &'a Proof::Member>,
+        context: Context,
+        message: Vec<u8>,
+    ) -> Result<Self, ()>
+    where
+        Proof::Member: 'a,
+    {
+        let (proof, alias) = Proof::create(secret, members, members_iter, &context, &message)?;
+        Ok(Self {
+            proof,
+            alias,
+            message,
+        })
+    }
+    pub fn alias(&self) -> &Alias {
+        &self.alias
+    }
+    pub fn message(&self) -> &[u8] {
+        &self.message
+    }
+    pub fn into_parts(self) -> (Alias, Vec<u8>) {
+        (self.alias, self.message)
+    }
+    pub fn verify(
+        self,
+        members: &Proof::Members,
+        context: &Context,
+    ) -> Result<(Alias, Vec<u8>), Self> {
+        if self.is_valid(members, context) {
+            Ok(self.into_parts())
+        } else {
+            Err(self)
+        }
+    }
+    pub fn is_valid(&self, members: &Proof::Members, context: &Context) -> bool {
+        self.proof
+            .is_valid(members, context, &self.alias, &self.message)
+    }
+}
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn simple_works() {
-		let alice_sec: SchnorrkelSecret = [0u8; 32].into();
-		let bob_sec: SchnorrkelSecret = [1u8; 32].into();
-		let charlie_sec: SchnorrkelSecret = [2u8; 32].into();
-		let alice: SchnorrkelPublic = alice_sec.clone().into();
-		let bob: SchnorrkelPublic = bob_sec.clone().into();
-		let mut build_members = <Simple as Verifiable>::Members::start();
-		<Simple as Verifiable>::Members::push(&mut build_members, alice.clone());
-		<Simple as Verifiable>::Members::push(&mut build_members, bob.clone());
-		let members = <Simple as Verifiable>::Members::finish(build_members);
+    #[test]
+    fn simple_works() {
+        let alice_sec = <Simple as Verifiable>::new_secret([0u8; 32]);
+        let bob_sec = <Simple as Verifiable>::new_secret([1u8; 32]);
+        let charlie_sec = <Simple as Verifiable>::new_secret([2u8; 32]);
+        let alice = <Simple as Verifiable>::member_from_secret(&alice_sec);
+        let bob = <Simple as Verifiable>::member_from_secret(&bob_sec);
 
-		type SimpleReceipt = Receipt<Simple>;
-		let context = [69u8; 32];
-		let message = b"Hello world";
+        let mut inter = <Simple as Verifiable>::start_members();
+        <Simple as Verifiable>::push_member(&mut inter, alice.clone());
+        <Simple as Verifiable>::push_member(&mut inter, bob.clone());
+        let members = <Simple as Verifiable>::finish_members(inter);
 
-		let r = SimpleReceipt::create(&alice_sec, &members, members.0.iter(), context, message.to_vec()).unwrap();
-		let (alias, msg) = r.verify(&members, &context).unwrap();
-		assert_eq!(&message[..], &msg[..]);
-		assert_eq!(alias, alice.0);
+        type SimpleReceipt = Receipt<Simple>;
+        let context = [69u8; 32];
+        let message = b"Hello world";
 
-		let r = SimpleReceipt::create(&bob_sec, &members, members.0.iter(), context, message.to_vec()).unwrap();
-		let (alias, msg) = r.verify(&members, &context).unwrap();
-		assert_eq!(&message[..], &msg[..]);
-		assert_eq!(alias, bob.0);
+        let r = SimpleReceipt::create(
+            &alice_sec,
+            &members,
+            members.iter(),
+            context,
+            message.to_vec(),
+        )
+        .unwrap();
+        let (alias, msg) = r.verify(&members, &context).unwrap();
+        assert_eq!(&message[..], &msg[..]);
+        assert_eq!(alias, alice);
 
-		assert!(SimpleReceipt::create(&charlie_sec, &members, members.0.iter(), context, message.to_vec()).is_err());
-	}
+        let r = SimpleReceipt::create(
+            &bob_sec,
+            &members,
+            members.iter(),
+            context,
+            message.to_vec(),
+        )
+        .unwrap();
+        let (alias, msg) = r.verify(&members, &context).unwrap();
+        assert_eq!(&message[..], &msg[..]);
+        assert_eq!(alias, bob);
 
-	const SIG_CON: &[u8] = b"test";
+        assert!(SimpleReceipt::create(
+            &charlie_sec,
+            &members,
+            members.iter(),
+            context,
+            message.to_vec()
+        )
+        .is_err());
+    }
 
-	#[test]
-	fn simple_crypto() {
-		let secret = [0; 32];
-		let keypair = MiniSecretKey::from_bytes(&secret[..]).unwrap().expand_to_keypair(ExpansionMode::Ed25519);
-		let public: [u8; 32] = keypair.public.to_bytes();
-		let message = b"Hello world!";
-		let sig = keypair.sign(signing_context(SIG_CON).bytes(&message[..])).to_bytes();
+    const SIG_CON: &[u8] = b"test";
 
-		let ok = {
-			let s = schnorrkel::Signature::from_bytes(&sig).unwrap();
-			let p = PublicKey::from_bytes(&public).unwrap();
-			p.verify_simple(SIG_CON, &message[..], &s).is_ok()
-		};
-		assert!(ok);
+    #[test]
+    fn simple_crypto() {
+        let secret = [0; 32];
+        let keypair = MiniSecretKey::from_bytes(&secret[..])
+            .unwrap()
+            .expand_to_keypair(ExpansionMode::Ed25519);
+        let public: [u8; 32] = keypair.public.to_bytes();
+        let message = b"Hello world!";
+        let sig = keypair
+            .sign(signing_context(SIG_CON).bytes(&message[..]))
+            .to_bytes();
 
-		let mut sig = sig;
-		sig[0] = 0;
+        let ok = {
+            let s = schnorrkel::Signature::from_bytes(&sig).unwrap();
+            let p = PublicKey::from_bytes(&public).unwrap();
+            p.verify_simple(SIG_CON, &message[..], &s).is_ok()
+        };
+        assert!(ok);
 
-		let ok = {
-			let s = schnorrkel::Signature::from_bytes(&sig).unwrap();
-			let p = PublicKey::from_bytes(&public).unwrap();
-			p.verify_simple(SIG_CON, &message[..], &s).is_ok()
-		};
-		assert!(!ok);
-	}
+        let mut sig = sig;
+        sig[0] = 0;
+
+        let ok = {
+            let s = schnorrkel::Signature::from_bytes(&sig).unwrap();
+            let p = PublicKey::from_bytes(&public).unwrap();
+            p.verify_simple(SIG_CON, &message[..], &s).is_ok()
+        };
+        assert!(!ok);
+    }
 }
