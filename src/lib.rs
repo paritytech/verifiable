@@ -6,9 +6,6 @@ use std::vec::Vec;
 
 // Fixed types:
 
-/// The context under which membership is proven. Proofs over different `Context`s are
-/// unlinkable.
-pub type Context = [u8; 32];
 /// Identifier for an member verifiable by a proof. A member's alias is fixed for any given context.
 pub type Alias = [u8; 32];
 /// Entropy supplied for the creation of a secret key.
@@ -40,6 +37,8 @@ pub trait Verifiable:
 	type Member: Clone + PartialEq + FullCodec;
 	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
 	type Secret: Clone + PartialEq + FullCodec;
+	/// 
+	type Opening: Clone + PartialEq + FullCodec;
 
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
@@ -65,15 +64,31 @@ pub trait Verifiable:
 	/// individual.
 	///
 	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
-	fn create<'a>(
-		secret: &Self::Secret,
-		members: &Self::Members,
+	fn open<'a>(
+		member: &Self::Member,
 		members_iter: impl Iterator<Item = &'a Self::Member>,
-		context: &Context,
-		message: &[u8],
-	) -> Result<(Self, Alias), ()>
-	where
+	) -> Result<Self::Opening, ()>
 		Self::Member: 'a;
+
+	/// Create a proof of membership in `members` using the given `secret` of a member. Witness
+	/// information of an iterator through the set idenfified by `members` must be provided with
+	/// `members_iter`.
+	///
+	/// The proof will be specific to a given `context` (which determines the resultant `Alias` of
+	/// the member in a way unlinkable to the member's original identifiaction and aliases in any
+	/// other contexts) together with a provided `message` which entirely at the choice of the
+	/// individual.
+	///
+	/// - `context`: The context under which membership is proven. Proofs over different `Context`s are
+	/// unlinkable.
+	///
+	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
+	fn create(
+		opening: Self::Opening,
+		secret: &Self::Secret,
+		context: &[u8]],
+		message: &[u8],
+	) -> Result<(Self, Alias), ()>;
 
 	/// Check whether `self` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
@@ -81,7 +96,7 @@ pub trait Verifiable:
 	fn is_valid(
 		&self,
 		members: &Self::Members,
-		context: &Context,
+		context: &[u8],
 		alias: &Alias,
 		message: &[u8],
 	) -> bool;
