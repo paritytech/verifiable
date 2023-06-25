@@ -37,8 +37,9 @@ pub trait Verifiable:
 	type Member: Clone + PartialEq + FullCodec;
 	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
 	type Secret: Clone + PartialEq + FullCodec;
-	/// 
-	type Opening: Clone + PartialEq + FullCodec;
+	/// A partially-created proof. This is created by the `open` function and utilized by the
+	/// `create` function.
+	type Commitment: Clone + PartialEq + FullCodec;
 
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
@@ -54,39 +55,36 @@ pub trait Verifiable:
 	/// secret-to-public-key function of the crypto.
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member;
 
-	/// Create a proof of membership in `members` using the given `secret` of a member. Witness
-	/// information of an iterator through the set idenfified by `members` must be provided with
-	/// `members_iter`.
+	/// First step in creating a proof that `member` exists in a group `members`. The result of this
+	/// must be passed into `create` in order to actually create the proof.
 	///
-	/// The proof will be specific to a given `context` (which determines the resultant `Alias` of
-	/// the member in a way unlinkable to the member's original identifiaction and aliases in any
-	/// other contexts) together with a provided `message` which entirely at the choice of the
-	/// individual.
+	/// This operation uses the potentially large set `members` and as such is expected to be
+	/// executed on a device with access to the chain state and is presumably online. The
+	/// counterpart operation `create` does not utilize this data. It does require knowledge of the
+	/// `Secret` for `member` and as such is practical to conduct on an offline/air-gapped device.
 	///
 	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
 	fn open<'a>(
 		member: &Self::Member,
 		members_iter: impl Iterator<Item = &'a Self::Member>,
-	) -> Result<Self::Opening, ()>
-		Self::Member: 'a;
+	) -> Result<Self::Commitment, ()> where Self::Member: 'a;
 
-	/// Create a proof of membership in `members` using the given `secret` of a member. Witness
-	/// information of an iterator through the set idenfified by `members` must be provided with
-	/// `members_iter`.
+	/// Create a proof of membership with the `commitment` using the given `secret` of the member
+	/// of the `commitment`.
 	///
 	/// The proof will be specific to a given `context` (which determines the resultant `Alias` of
 	/// the member in a way unlinkable to the member's original identifiaction and aliases in any
 	/// other contexts) together with a provided `message` which entirely at the choice of the
 	/// individual.
 	///
-	/// - `context`: The context under which membership is proven. Proofs over different `Context`s are
-	/// unlinkable.
+	/// - `context`: The context under which membership is proven. Proofs over different `[u8]`s
+	/// are unlinkable.
 	///
 	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
 	fn create(
-		opening: Self::Opening,
+		commitment: Self::Commitment,
 		secret: &Self::Secret,
-		context: &[u8]],
+		context: &[u8],
 		message: &[u8],
 	) -> Result<(Self, Alias), ()>;
 
@@ -115,6 +113,7 @@ impl Verifiable for Trivial {
 	type Intermediate = Vec<Self::Member>;
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
+	type Commitment = (Self::Member, Self::Members);
 
 	fn start_members() -> Self::Intermediate {
 		Vec::new()
@@ -134,18 +133,28 @@ impl Verifiable for Trivial {
 		secret.clone()
 	}
 
-	fn create<'a>(
-		secret: &Self::Secret,
-		members: &Self::Members,
-		_members_iter: impl Iterator<Item = &'a Self::Member>,
-		_context: &Context,
-		_message: &[u8],
-	) -> Result<(Self, Alias), ()>
+	fn open<'a>(
+		member: &Self::Member,
+		members: impl Iterator<Item = &'a Self::Member>,
+	) -> Result<Self::Commitment, ()>
 	where
 		Self::Member: 'a,
 	{
-		if !members.contains(&secret) {
+		let set = members.cloned().collect::<Vec<_>>();
+		if !set.contains(member) {
 			return Err(());
+		}
+		Ok((member.clone(), set))
+	}
+
+	fn create(
+		(member, _): Self::Commitment,
+		secret: &Self::Secret,
+		_context: &[u8],
+		_message: &[u8],
+	) -> Result<(Self, Alias), ()> {
+		if &member != secret {
+			return Err(())
 		}
 		Ok((Self(secret.clone()), secret.clone()))
 	}
@@ -153,7 +162,7 @@ impl Verifiable for Trivial {
 	fn is_valid(
 		&self,
 		members: &Self::Members,
-		_context: &Context,
+		_context: &[u8],
 		alias: &Alias,
 		_message: &[u8],
 	) -> bool {
@@ -171,6 +180,7 @@ impl Verifiable for Simple {
 	type Intermediate = Vec<Self::Member>;
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
+	type Commitment = (Self::Member, Self::Members);
 
 	fn start_members() -> Self::Intermediate {
 		Vec::new()
@@ -192,18 +202,28 @@ impl Verifiable for Simple {
 		pair.public.to_bytes()
 	}
 
-	fn create<'a>(
-		secret: &Self::Secret,
-		members: &Self::Members,
-		_members_iter: impl Iterator<Item = &'a Self::Member>,
-		context: &Context,
-		message: &[u8],
-	) -> Result<(Self, Alias), ()>
+	fn open<'a>(
+		member: &Self::Member,
+		members: impl Iterator<Item = &'a Self::Member>,
+	) -> Result<Self::Commitment, ()>
 	where
 		Self::Member: 'a,
 	{
+		let set = members.cloned().collect::<Vec<_>>();
+		if !set.contains(member) {
+			return Err(());
+		}
+		Ok((member.clone(), set))
+	}
+
+	fn create(
+		(member, _): Self::Commitment,
+		secret: &Self::Secret,
+		context: &[u8],
+		message: &[u8],
+	) -> Result<(Self, Alias), ()> {
 		let public = Self::member_from_secret(&secret);
-		if !members.contains(&public) {
+		if member != public {
 			return Err(());
 		}
 
@@ -218,7 +238,7 @@ impl Verifiable for Simple {
 	fn is_valid(
 		&self,
 		members: &Self::Members,
-		context: &Context,
+		context: &[u8],
 		alias: &Alias,
 		message: &[u8],
 	) -> bool {
@@ -242,20 +262,16 @@ pub struct Receipt<Proof> {
 impl<Proof: Verifiable> Receipt<Proof> {
 	pub fn create<'a>(
 		secret: &Proof::Secret,
-		members: &Proof::Members,
-		members_iter: impl Iterator<Item = &'a Proof::Member>,
-		context: Context,
+		members: impl Iterator<Item = &'a Proof::Member>,
+		context: &[u8],
 		message: Vec<u8>,
 	) -> Result<Self, ()>
 	where
 		Proof::Member: 'a,
 	{
-		let (proof, alias) = Proof::create(secret, members, members_iter, &context, &message)?;
-		Ok(Self {
-			proof,
-			alias,
-			message,
-		})
+		let commitment = Proof::open(&Proof::member_from_secret(secret), members)?;
+		let (proof, alias) = Proof::create(commitment, secret, context, &message)?;
+		Ok(Self { proof, alias, message })
 	}
 	pub fn alias(&self) -> &Alias {
 		&self.alias
@@ -269,7 +285,7 @@ impl<Proof: Verifiable> Receipt<Proof> {
 	pub fn verify(
 		self,
 		members: &Proof::Members,
-		context: &Context,
+		context: &[u8],
 	) -> Result<(Alias, Vec<u8>), Self> {
 		if self.is_valid(members, context) {
 			Ok(self.into_parts())
@@ -277,7 +293,7 @@ impl<Proof: Verifiable> Receipt<Proof> {
 			Err(self)
 		}
 	}
-	pub fn is_valid(&self, members: &Proof::Members, context: &Context) -> bool {
+	pub fn is_valid(&self, members: &Proof::Members, context: &[u8]) -> bool {
 		self.proof
 			.is_valid(members, context, &self.alias, &self.message)
 	}
@@ -301,12 +317,11 @@ mod tests {
 		let members = <Simple as Verifiable>::finish_members(inter);
 
 		type SimpleReceipt = Receipt<Simple>;
-		let context = [69u8; 32];
+		let context = &b"My context"[..];
 		let message = b"Hello world";
 
 		let r = SimpleReceipt::create(
 			&alice_sec,
-			&members,
 			members.iter(),
 			context,
 			message.to_vec(),
@@ -318,7 +333,6 @@ mod tests {
 
 		let r = SimpleReceipt::create(
 			&bob_sec,
-			&members,
 			members.iter(),
 			context,
 			message.to_vec(),
@@ -330,7 +344,6 @@ mod tests {
 
 		assert!(SimpleReceipt::create(
 			&charlie_sec,
-			&members,
 			members.iter(),
 			context,
 			message.to_vec()
