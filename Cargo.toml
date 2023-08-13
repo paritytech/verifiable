@@ -6,6 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+rand_core = { version = "0.6", default-features = false }
+derive-where = "1.2"
+
 parity-scale-codec = { version = "3.6.1", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.7.0", default-features = false, features = ["derive"] }
 schnorrkel = "0.10.2"
+
+ark-scale = { git = "https://github.com/w3f/ark-scale.git" }
+bandersnatch_vrfs = { git = "https://github.com/w3f/ring-vrf.git" }
