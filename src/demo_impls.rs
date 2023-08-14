@@ -1,4 +1,5 @@
 use super::*;
+use bounded_collections::{BoundedVec, ConstU32};
 
 // Example impls:
 
@@ -6,21 +7,20 @@ use super::*;
 /// just the identity. The `alias` is always the identity and the root is just a `Vec<Self::Member>`.
 /// Verification just checks that the proof and the alias are the same and that the alias exists
 /// in the "root" (just a Vec).
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
-pub struct Trivial([u8; 32]);
-impl Verifiable for Trivial {
-	type Members = Vec<Self::Member>;
-	type Intermediate = Vec<Self::Member>;
+pub struct Trivial;
+impl GenerateVerifiable for Trivial {
+	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
+	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
-	type Commitment = (Self::Member, Self::Members);
+	type Commitment = (Self::Member, Vec<Self::Member>);
+	type Proof = [u8; 32];
 
 	fn start_members() -> Self::Intermediate {
-		Vec::new()
+		BoundedVec::new()
 	}
 	fn push_member(inter: &mut Self::Intermediate, who: Self::Member) -> Result<(), ()> {
-		inter.push(who);
-		Ok(())
+		inter.try_push(who).map_err(|_| ())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
@@ -53,21 +53,21 @@ impl Verifiable for Trivial {
 		secret: &Self::Secret,
 		_context: &[u8],
 		_message: &[u8],
-	) -> Result<(Self, Alias), ()> {
+	) -> Result<(Self::Proof, Alias), ()> {
 		if &member != secret {
 			return Err(())
 		}
-		Ok((Self(secret.clone()), secret.clone()))
+		Ok(((secret.clone()), secret.clone()))
 	}
 
 	fn validate(
-		&self,
+		proof: &Self::Proof,
 		members: &Self::Members,
 		_context: &[u8],
 		_message: &[u8],
 	) -> Result<Alias, ()> {
-		if members.contains(&self.0) {
-			Ok(self.0.clone())
+		if members.contains(&proof) {
+			Ok(proof.clone())
 		} else {
 			Err(())
 		}
@@ -78,20 +78,20 @@ const SIG_CON: &[u8] = b"verifiable";
 
 /// Example impl of `Verifiable` which uses Schnorrkel. This doesn't anonymise anything.
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
-pub struct Simple([u8; 64], Alias);
-impl Verifiable for Simple {
-	type Members = Vec<Self::Member>;
-	type Intermediate = Vec<Self::Member>;
+pub struct Simple;
+impl GenerateVerifiable for Simple {
+	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
+	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
-	type Commitment = (Self::Member, Self::Members);
+	type Commitment = (Self::Member, Vec<Self::Member>);
+	type Proof = ([u8; 64], Alias);
 
 	fn start_members() -> Self::Intermediate {
-		Vec::new()
+		BoundedVec::new()
 	}
 	fn push_member(inter: &mut Self::Intermediate, who: Self::Member) -> Result<(), ()> {
-		inter.push(who);
-		Ok(())
+		inter.try_push(who).map_err(|_| ())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
@@ -126,7 +126,7 @@ impl Verifiable for Simple {
 		secret: &Self::Secret,
 		context: &[u8],
 		message: &[u8],
-	) -> Result<(Self, Alias), ()> {
+	) -> Result<(Self::Proof, Alias), ()> {
 		let public = Self::member_from_secret(&secret);
 		if member != public {
 			return Err(());
@@ -137,21 +137,21 @@ impl Verifiable for Simple {
 
 		let sig = (context, message)
 			.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
-		Ok((Self(sig, public.clone()), public))
+		Ok(((sig, public.clone()), public))
 	}
 
 	fn validate(
-		&self,
+		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
-		if !members.contains(&self.1) {
+		if !members.contains(&proof.1) {
 			return Err(());
 		}
-		let s = schnorrkel::Signature::from_bytes(&self.0).unwrap();
-		let p = PublicKey::from_bytes(&self.1).unwrap();
-		(context, message).using_encoded(|b| p.verify_simple(SIG_CON, b, &s).map(|_| self.1.clone()).map_err(|_| ()))
+		let s = schnorrkel::Signature::from_bytes(&proof.0).unwrap();
+		let p = PublicKey::from_bytes(&proof.1).unwrap();
+		(context, message).using_encoded(|b| p.verify_simple(SIG_CON, b, &s).map(|_| proof.1.clone()).map_err(|_| ()))
 	}
 }
 
@@ -161,16 +161,16 @@ mod tests {
 
 	#[test]
 	fn simple_works() {
-		let alice_sec = <Simple as Verifiable>::new_secret([0u8; 32]);
-		let bob_sec = <Simple as Verifiable>::new_secret([1u8; 32]);
-		let charlie_sec = <Simple as Verifiable>::new_secret([2u8; 32]);
-		let alice = <Simple as Verifiable>::member_from_secret(&alice_sec);
-		let bob = <Simple as Verifiable>::member_from_secret(&bob_sec);
+		let alice_sec = <Simple as GenerateVerifiable>::new_secret([0u8; 32]);
+		let bob_sec = <Simple as GenerateVerifiable>::new_secret([1u8; 32]);
+		let charlie_sec = <Simple as GenerateVerifiable>::new_secret([2u8; 32]);
+		let alice = <Simple as GenerateVerifiable>::member_from_secret(&alice_sec);
+		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
-		let mut inter = <Simple as Verifiable>::start_members();
-		<Simple as Verifiable>::push_member(&mut inter, alice.clone());
-		<Simple as Verifiable>::push_member(&mut inter, bob.clone());
-		let members = <Simple as Verifiable>::finish_members(inter);
+		let mut inter = <Simple as GenerateVerifiable>::start_members();
+		<Simple as GenerateVerifiable>::push_member(&mut inter, alice.clone()).unwrap();
+		<Simple as GenerateVerifiable>::push_member(&mut inter, bob.clone()).unwrap();
+		let members = <Simple as GenerateVerifiable>::finish_members(inter);
 
 		type SimpleReceipt = Receipt<Simple>;
 		let context = &b"My context"[..];

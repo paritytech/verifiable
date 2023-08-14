@@ -1,17 +1,14 @@
 use super::*;
 use core::{
-	fmt::Debug,
 	marker::PhantomData,
 };
-use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
-use scale_info::*;
+use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
 use ark_scale::ArkScale;
 use bandersnatch_vrfs::{
 	SecretKey, PublicKey, RingVrfSignature, ring,
-	CanonicalSerialize,CanonicalDeserialize,SerializationError, // ark_serialize::
+	CanonicalDeserialize, // ark_serialize::
 };
 use alloc::vec::Vec;
-use core::fmt;
 use derive_where::derive_where;
 
 // A hack that moves the .
@@ -39,10 +36,7 @@ impl Web3SumKZG for Test2e10 {
 #[derive(Encode, Decode, TypeInfo, MaxEncodedLen)]
 #[derive_where(Clone, Eq, PartialEq, Debug)]
 #[scale_info(skip_type_params(KZG))]
-pub struct BandersnatchRingVRF<KZG: 'static>(
-	ArkScale<RingVrfSignature<1>>,
-	PhantomData<fn() -> &'static KZG>
-);
+pub struct BandersnatchRingVRF<KZG: 'static>(PhantomData<fn() -> &'static KZG>);
 
 /*impl<KZG> fmt::Debug for BandersnatchRingVRF<KZG> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -62,7 +56,7 @@ fn do_output(out: [bandersnatch_vrfs::VrfInOut; 1]) -> Alias {
 	out[0].vrf_output_bytes(b"Polkadot Fellowship Alias : Output")
 } 
 
-impl<KZG: Web3SumKZG> Verifiable for BandersnatchRingVRF<KZG> {
+impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 
 //	fn unverified_alias(&self, context: &[u8]) -> Alias {
 //		self.0.preoutputs[0]
@@ -101,15 +95,18 @@ impl<KZG: Web3SumKZG> Verifiable for BandersnatchRingVRF<KZG> {
         ArkScale(KZG::kzg().verifier_key(inter.0))
 	}
 
+    type Proof = ArkScale<RingVrfSignature<1>>;
+
 	fn validate(
-		&self,
+		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
         let ring_verifier = KZG::kzg().init_ring_verifier(members.0.clone());
- 		self.0.0.verify_ring_vrf(message, core::iter::once(do_input(context)), &ring_verifier)
-		.map(do_output).map_err(|x| { let r: Result<Alias, _> = Err(x); r.unwrap(); () })
+ 		proof.0.verify_ring_vrf(message, core::iter::once(do_input(context)), &ring_verifier)
+		.map(do_output)
+        .map_err(|x| { let r: Result<Alias, _> = Err(x); r.unwrap(); () })
 	}
 
     ///
@@ -143,11 +140,11 @@ impl<KZG: Web3SumKZG> Verifiable for BandersnatchRingVRF<KZG> {
 		secret: &Self::Secret,
 		context: &[u8],
 		message: &[u8],
-	) -> Result<(Self, Alias), ()> {
+	) -> Result<(Self::Proof, Alias), ()> {
 		assert!((me as usize) < KZG::kzg().max_keyset_size());
 		let io: [_; 1] = [secret.0.vrf_inout(do_input(context))];
         let ring_prover = KZG::kzg().init_ring_prover(members.0, me as usize);
         let signature: RingVrfSignature<1> = secret.sign_ring_vrf(message, &io, &ring_prover);
-        Ok(( BandersnatchRingVRF(ArkScale(signature),PhantomData), do_output(io) ))
+        Ok(( ArkScale(signature), do_output(io) ))
 	}
 }

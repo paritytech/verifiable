@@ -2,7 +2,7 @@ extern crate alloc;
 extern crate core;
 
 use core::fmt::Debug;
-use parity_scale_codec::{Decode, Encode, Codec, FullCodec, MaxEncodedLen};
+use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 use alloc::vec::Vec;
@@ -31,21 +31,33 @@ pub type Entropy = [u8; 32];
 ///
 /// A convenience `Receipt` type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
-pub trait Verifiable:
-	Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen
-{
+pub trait GenerateVerifiable {
 	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
-	type Members: Codec;
+	///
+	/// This is envisioned to be stored on-chain and passed between chains.
+	type Members: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen + MaxEncodedLen;
 	/// Intermediate value while building a `Self::Members` value. Probably just an unfinished Ring
-	/// Root(?)
-	type Intermediate: Codec;
+	/// Root(?).
+	///
+	/// This is envisioned to be stored on-chain.
+	type Intermediate: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen + MaxEncodedLen;
 	/// Value identifying a single member. Corresponds to the Public Key.
-	type Member: Clone + PartialEq + FullCodec;
+	///
+	/// This is stored on-chain and also expected to be passed on-chain as a parameter.
+	type Member: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen + MaxEncodedLen;
 	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
+	///
+	/// This is not envisioned to be used on-chain.
 	type Secret: Clone;
 	/// A partially-created proof. This is created by the `open` function and utilized by the
 	/// `create` function.
-	type Commitment: Codec;
+	///
+	/// This is not envisioned to be used on-chain.
+	type Commitment: FullCodec;
+	/// A proof which can be verified.
+	///
+	/// This is expected to be passed on-chain as a parameter, but never stored.
+	type Proof: Clone + Eq + PartialEq + FullCodec + Debug;
 
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
@@ -92,19 +104,19 @@ pub trait Verifiable:
 		secret: &Self::Secret,
 		context: &[u8],
 		message: &[u8],
-	) -> Result<(Self, Alias), ()>;
+	) -> Result<(Self::Proof, Alias), ()>;
 
 	/// Check whether `self` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
 	/// that they elected to opine `message`.
 	fn is_valid(
-		&self,
+		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
 		alias: &Alias,
 		message: &[u8],
 	) -> bool {
-		match self.validate(members, context, message) {
+		match Self::validate(proof, members, context, message) {
 			Ok(a) => &a == alias,
 			Err(()) => false,
 		}
@@ -112,33 +124,35 @@ pub trait Verifiable:
 
 	/// Like `is_valid`, but `alias` is returned, not provided.
 	fn validate(
-		&self,
-		members: &Self::Members,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<Alias, ()>;
+		_proof: &Self::Proof,
+		_members: &Self::Members,
+		_context: &[u8],
+		_message: &[u8],
+	) -> Result<Alias, ()> {
+		Err(())
+	}
 }
 
 // This is just a convenience struct to help manage some of the witness data. No need to look at it.
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
-pub struct Receipt<Proof> {
-	proof: Proof,
+pub struct Receipt<Gen: GenerateVerifiable> {
+	proof: Gen::Proof,
 	alias: Alias,
 	message: Vec<u8>,
 }
 
-impl<Proof: Verifiable> Receipt<Proof> {
+impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	pub fn create<'a>(
-		secret: &Proof::Secret,
-		members: impl Iterator<Item = &'a Proof::Member>,
+		secret: &Gen::Secret,
+		members: impl Iterator<Item = &'a Gen::Member>,
 		context: &[u8],
 		message: Vec<u8>,
 	) -> Result<Self, ()>
 	where
-		Proof::Member: 'a,
+		Gen::Member: 'a,
 	{
-		let commitment = Proof::open(&Proof::member_from_secret(secret), members)?;
-		let (proof, alias) = Proof::create(commitment, secret, context, &message)?;
+		let commitment = Gen::open(&Gen::member_from_secret(secret), members)?;
+		let (proof, alias) = Gen::create(commitment, secret, context, &message)?;
 		Ok(Self { proof, alias, message })
 	}
 	pub fn alias(&self) -> &Alias {
@@ -152,17 +166,19 @@ impl<Proof: Verifiable> Receipt<Proof> {
 	}
 	pub fn verify(
 		self,
-		members: &Proof::Members,
+		members: &Gen::Members,
 		context: &[u8],
 	) -> Result<(Alias, Vec<u8>), Self> {
-		if self.is_valid(members, context) {
-			Ok(self.into_parts())
-		} else {
-			Err(self)
+		match Gen::validate(&self.proof, members, context, &self.message) {
+			Ok(alias) => Ok((alias, self.message)),
+			Err(()) => if self.is_valid(members, context) {
+				Ok(self.into_parts())
+			} else {
+				Err(self)
+			}
 		}
 	}
-	pub fn is_valid(&self, members: &Proof::Members, context: &[u8]) -> bool {
-		self.proof
-			.is_valid(members, context, &self.alias, &self.message)
+	pub fn is_valid(&self, members: &Gen::Members, context: &[u8]) -> bool {
+		Gen::is_valid(&self.proof, members, context, &self.alias, &self.message)
 	}
 }

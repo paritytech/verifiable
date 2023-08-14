@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 rand_core = { version = "0.6", default-features = false }
 derive-where = "1.2"
+bounded-collections = "0.1.8"
 
 parity-scale-codec = { version = "3.6.1", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.7.0", default-features = false, features = ["derive"] }
