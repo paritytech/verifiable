@@ -35,7 +35,7 @@ pub trait GenerateVerifiable {
 	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
 	///
 	/// This is envisioned to be stored on-chain and passed between chains.
-	type Members: Clone/* + Eq + PartialEq*/ + FullCodec/* + Debug + TypeInfo*/ + MaxEncodedLen;
+	type Members: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 	/// Intermediate value while building a `Self::Members` value. Probably just an unfinished Ring
 	/// Root(?).
 	///
