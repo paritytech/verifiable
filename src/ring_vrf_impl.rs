@@ -3,7 +3,7 @@ use core::{
 	marker::PhantomData,
 };
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
-use ark_scale::ArkScale;
+use ark_scale::{ArkScale, ArkScaleMaxEncodedLen};
 use bandersnatch_vrfs::{
 	SecretKey, PublicKey, RingVrfSignature, ring,
 	CanonicalDeserialize, // ark_serialize::
