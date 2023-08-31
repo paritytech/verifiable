@@ -109,7 +109,6 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
         .map_err(|x| { let r: Result<Alias, _> = Err(x); r.unwrap(); () })
 	}
 
-    ///
 	type Commitment = (u32, ArkScale<bandersnatch_vrfs::ring::ProverKey>);
 
 	fn open<'a>(
