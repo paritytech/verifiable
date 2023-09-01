@@ -8,7 +8,7 @@ use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 use alloc::vec::Vec;
 
 //mod ring_vrf_impl;
-mod demo_impls;
+pub mod demo_impls;
 
 // Fixed types:
 
