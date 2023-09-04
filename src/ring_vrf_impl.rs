@@ -5,7 +5,7 @@ use core::{
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
 use ark_scale::{ArkScale, ArkScaleMaxEncodedLen};
 use bandersnatch_vrfs::{
-	SecretKey, PublicKey, RingVrfSignature, ring,
+	SecretKey, PublicKey, RingVrfSignature, RingVerifier, RingProver, ring,
 	CanonicalDeserialize, // ark_serialize::
 };
 use alloc::vec::Vec;
@@ -69,7 +69,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 		SecretKey::from_seed(&entropy)
 	}
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
-		secret.to_public().serialize()
+		bandersnatch_vrfs::serialize_publickey(&secret.to_public())
 	}
 
 	/// TODO: Interface #2 would make this sane.
@@ -95,7 +95,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
         ArkScale(KZG::kzg().verifier_key(inter.0))
 	}
 
-    type Proof = ArkScale<RingVrfSignature<1>>;
+    type Proof = RingVrfSignature<1>;
 
 	fn validate(
 		proof: &Self::Proof,
@@ -103,9 +103,12 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
-        let ring_verifier = KZG::kzg().init_ring_verifier(members.0.clone());
- 		proof.0.verify_ring_vrf(message, core::iter::once(do_input(context)), &ring_verifier)
-		.map(do_output)
+        let ring_verifier = KZG::kzg().init_ring_verifier(members.clone());
+		RingVerifier(ring_verifier).verify_ring_vrf(
+			message,
+			core::iter::once(do_input(context)),
+			&proof
+		).map(do_output)
         .map_err(|x| { let r: Result<Alias, _> = Err(x); r.unwrap(); () })
 	}
 
@@ -126,7 +129,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 		for member in members {
             if i >= max_len { return Err(()); }
 			if myself == member { me = i }
-			pks.push(PublicKey::deserialize(&member[..]).map_err(|_| ())?.0.0);
+			pks.push(PublicKey::deserialize(&member[..]).map_err(|_| ())?.0);
 			i += 1;
 		}
 		if me == u32::MAX { return Err(()); }
@@ -136,14 +139,16 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 	fn create(
 		// Sergey TODO: This should be a borrow but ring-prover still consumes it.
 		(me, members): Self::Commitment,
-		secret: &Self::Secret,
+		secret: &Self::Secret, 
 		context: &[u8],
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
 		assert!((me as usize) < KZG::kzg().max_keyset_size());
-		let io: [_; 1] = [secret.0.vrf_inout(do_input(context))];
-        let ring_prover = KZG::kzg().init_ring_prover(members.0, me as usize);
-        let signature: RingVrfSignature<1> = secret.sign_ring_vrf(message, &io, &ring_prover);
-        Ok(( ArkScale(signature), do_output(io) ))
+		let io: [_; 1] = [secret.vrf_inout(do_input(context))];
+        let ring_prover = KZG::kzg().init_ring_prover(members, me as usize);
+        let signature: RingVrfSignature<1> = RingProver {
+			ring_prover: &ring_prover, secret
+		}.sign_ring_vrf(message, &io);
+        Ok(( signature, do_output(io) ))
 	}
 }
