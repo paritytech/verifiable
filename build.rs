@@ -8,7 +8,7 @@ use bandersnatch_vrfs::{ring,CanonicalSerialize};
 fn main() {
     let domain_size = 2u32.pow(10);
 
-    let path = std::path::Path::new("test2e10.kzg");
+    let path = std::path::Path::new("src/test2e10.kzg");
     // File::create_new(&path)
     use std::fs::{OpenOptions};
     let mut oo = OpenOptions::new();
