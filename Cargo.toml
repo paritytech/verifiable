@@ -18,6 +18,5 @@ ark-serialize = { version = "0.4", default-features = false, features = [ "deriv
 
 ark-scale = { version = "0.0.10" }
 
-# bandersnatch_vrfs = { git = "https://github.com/w3f/ring-vrf.git" }
-bandersnatch_vrfs = { path = "/mnt/home/home/jeff/Documents/rvrf/ring-vrf/bandersnatch_vrfs/" }
+bandersnatch_vrfs = { git = "https://github.com/w3f/ring-vrf.git" }
 
