@@ -3,10 +3,10 @@ use core::{
 	marker::PhantomData,
 };
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
-use ark_scale::{ArkScale, ArkScaleMaxEncodedLen};
+use ark_serialize::{CanonicalDeserialize,CanonicalSerialize};
 use bandersnatch_vrfs::{
 	SecretKey, PublicKey, RingVrfSignature, RingVerifier, RingProver, ring,
-	CanonicalDeserialize, // ark_serialize::
+	scale::{ArkScale,EncodeLike}
 };
 use alloc::vec::Vec;
 use derive_where::derive_where;
@@ -56,6 +56,35 @@ fn do_output(out: [bandersnatch_vrfs::VrfInOut; 1]) -> Alias {
 	out[0].vrf_output_bytes(b"Polkadot Fellowship Alias : Output")
 } 
 
+#[derive(Debug,Clone,Eq,PartialEq,CanonicalDeserialize,CanonicalSerialize)]
+pub struct MembersSet(pub Vec<bandersnatch_vrfs::bandersnatch::SWAffine>);
+
+ark_scale::impl_scale_via_ark!(MembersSet);
+
+impl MaxEncodedLen for MembersSet {
+	fn max_encoded_len() -> usize {
+		// TODO: Sergey please fix this
+		32 * 1024  // Based upon maximum set size of 2^10 
+	}
+}
+
+// TODO: Sergey, Ain't clear if ring::VerifierKey was properly
+// designed for serialization.
+//
+// TODO: Sergey, Add Debug + Eq + PartialEq if they make sense
+#[derive(Clone,CanonicalDeserialize,CanonicalSerialize)]
+pub struct MemberCommitment(bandersnatch_vrfs::ring::VerifierKey);
+
+ark_scale::impl_scale_via_ark!(MemberCommitment);
+
+impl MaxEncodedLen for MemberCommitment {
+	fn max_encoded_len() -> usize {
+		// TODO: Sergey please fix this
+		4096
+	}
+}
+
+
 impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 
 //	fn unverified_alias(&self, context: &[u8]) -> Alias {
@@ -72,18 +101,17 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 		bandersnatch_vrfs::serialize_publickey(&secret.to_public())
 	}
 
-	/// TODO: Interface #2 would make this sane.
-	type Intermediate = ArkScale<Vec<bandersnatch_vrfs::bandersnatch::SWAffine>>;
+	type Intermediate = MembersSet;
 
-	type Members = ArkScale<bandersnatch_vrfs::ring::VerifierKey>;
+	type Members = MemberCommitment;
 
 	fn start_members() -> Self::Intermediate {
-		ArkScale(Vec::with_capacity( KZG::kzg().max_keyset_size() ))
+		MembersSet(Vec::with_capacity( KZG::kzg().max_keyset_size() ))
 	}
 	fn push_member(inter: &mut Self::Intermediate, who: Self::Member) -> Result<(),()> {
         if inter.0.len() == KZG::kzg().max_keyset_size() { return Err(()); }
 		let pk = PublicKey::deserialize(&who[..]).map_err(|_| ()) ?;
-		inter.0.push(pk.0.0);
+		inter.0.push(pk.0);
 		Ok(())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
@@ -92,7 +120,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
         // In theory, our ring-prover should pad the KZG but sergey has blatantly
 		// insecure padding right now:
 		// https://github.com/w3f/ring-proof/blob/master/ring/src/piop/params.rs#L56
-        ArkScale(KZG::kzg().verifier_key(inter.0))
+        MemberCommitment(KZG::kzg().verifier_key(inter.0))
 	}
 
     type Proof = RingVrfSignature<1>;
@@ -103,7 +131,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
-        let ring_verifier = KZG::kzg().init_ring_verifier(members.clone());
+        let ring_verifier = KZG::kzg().init_ring_verifier(members.0.clone());
 		RingVerifier(ring_verifier).verify_ring_vrf(
 			message,
 			core::iter::once(do_input(context)),
@@ -112,7 +140,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
         .map_err(|x| { let r: Result<Alias, _> = Err(x); r.unwrap(); () })
 	}
 
-	type Commitment = (u32, ArkScale<bandersnatch_vrfs::ring::ProverKey>);
+	type Commitment = (u32, bandersnatch_vrfs::ring::ProverKey);
 
 	fn open<'a>(
 		myself: &Self::Member,
@@ -133,7 +161,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 			i += 1;
 		}
 		if me == u32::MAX { return Err(()); }
-		Ok(( me, ArkScale(KZG::kzg().prover_key(pks)) ))
+		Ok(( me, KZG::kzg().prover_key(pks) ))
 	}
 
 	fn create(
@@ -152,3 +180,4 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
         Ok(( signature, do_output(io) ))
 	}
 }
+
