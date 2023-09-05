@@ -28,8 +28,7 @@ pub struct Test2e10;
 
 impl Web3SumKZG for Test2e10 {
 	fn kzg_bytes() -> &'static [u8] {
-        &b"Hello"[..]
-//		include_bytes!("testing.kzg")
+		include_bytes!("test2e10.kzg")
 	}
 }
 
@@ -181,3 +180,63 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 	}
 }
 
+#[cfg(test)]
+mod test {
+	use super::*;
+	use core::iter;
+	use rand_core::{RngCore,OsRng};
+	
+	fn random_bytes<const N: usize>() -> [u8; N] {
+		let mut entropy = [0u8; N];
+		OsRng.fill_bytes(&mut entropy);
+		entropy
+	}
+	
+	type BRVRF = BandersnatchRingVRF<Test2e10>;
+	type Member = [u8; 33];
+	
+	fn random_keypair() -> (Member,SecretKey) {
+		let secret = BRVRF::new_secret(random_bytes());
+		(BRVRF::member_from_secret(&secret), secret)
+	}
+	
+	fn random_ring() -> Vec<Member> {
+		let len = Test2e10::kzg().max_keyset_size();
+		let len = usize::from_le_bytes(random_bytes()) % len;
+		let mut v = Vec::with_capacity(len);
+		for _ in 0..len {
+			v.push(random_keypair().0);
+		}
+		v
+	}
+	
+	#[test]
+	fn send_n_recieve() {
+		let (me,secret) = random_keypair();
+	
+		// Random ring including me.
+		let mut ring = random_ring();
+		let idx = ring.len()/2;
+		ring[idx] = me;
+	
+		let context = random_bytes::<32>();
+		let message = random_bytes::<1024>();
+	
+		// Sign
+		let opening = BRVRF::open(&me,ring.iter()).unwrap();
+		let (signature,alias1) = BRVRF::create(opening,&secret,&context,&message).unwrap();
+	
+		// Serialize+Deserialize
+		let signature = signature.encode();
+		let signature = <BRVRF as GenerateVerifiable>::Proof::decode(&mut signature.as_slice()).unwrap();
+	
+		// Verify
+		let mut inter = BRVRF::start_members();
+		for m in &ring {
+			BRVRF::push_member(&mut inter, m.clone()).unwrap();
+		}
+		let members = BRVRF::finish_members(inter);
+		let alias2 = BRVRF::validate(&signature,&members,&context,&message).unwrap();
+		assert_eq!(alias1,alias2);
+	}
+}

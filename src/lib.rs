@@ -7,8 +7,10 @@ use scale_info::*;
 use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 use alloc::vec::Vec;
 
-mod ring_vrf_impl;
 pub mod demo_impls;
+
+pub mod ring_vrf_impl;
+pub use ring_vrf_impl::{Test2e10,Web3SumKZG};
 
 // Fixed types:
 
