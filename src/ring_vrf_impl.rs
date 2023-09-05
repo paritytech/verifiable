@@ -74,6 +74,13 @@ impl MaxEncodedLen for MembersSet {
 #[derive(Clone,CanonicalDeserialize,CanonicalSerialize)]
 pub struct MemberCommitment(bandersnatch_vrfs::ring::VerifierKey);
 
+use core::fmt;
+impl fmt::Debug for MemberCommitment {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "MemberCommitment")
+	}
+}
+
 ark_scale::impl_scale_via_ark!(MemberCommitment);
 
 impl MaxEncodedLen for MemberCommitment {

@@ -39,16 +39,16 @@ pub trait GenerateVerifiable {
 	/// This is envisioned to be stored on-chain and passed between chains.
 	/// 
  	/// TODO: Sergey, Add Eq + PartialEq to ring-proof.
-	type Members: Clone + FullCodec /*+ Debug + TypeInfo*/ + MaxEncodedLen;
+	type Members: Clone + FullCodec + Debug /* + TypeInfo*/ + MaxEncodedLen;
 	/// Intermediate value while building a `Self::Members` value. Probably just an unfinished Ring
 	/// Root(?).
 	///
 	/// This is envisioned to be stored on-chain.
-	type Intermediate: Clone + Eq + PartialEq + FullCodec /*+ Debug + TypeInfo */ + MaxEncodedLen;
+	type Intermediate: Clone + Eq + PartialEq + FullCodec + Debug/* + TypeInfo*/ + MaxEncodedLen;
 	/// Value identifying a single member. Corresponds to the Public Key.
 	///
 	/// This is stored on-chain and also expected to be passed on-chain as a parameter.
-	type Member: Clone + Eq + PartialEq + FullCodec + Debug /*+ TypeInfo + MaxEncodedLen */;
+	type Member: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
 	///
 	/// This is not envisioned to be used on-chain.
@@ -61,7 +61,7 @@ pub trait GenerateVerifiable {
 	/// A proof which can be verified.
 	///
 	/// This is expected to be passed on-chain as a parameter, but never stored.
-	type Proof/*: Clone + Eq + PartialEq + FullCodec + Debug*/;
+	type Proof: Clone + Eq + PartialEq + FullCodec + Debug;
 
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
