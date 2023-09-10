@@ -138,7 +138,7 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 		message: &[u8],
 	) -> Result<Alias, ()> {
         let ring_verifier = KZG::kzg().init_ring_verifier(members.0.clone());
-		RingVerifier(ring_verifier).verify_ring_vrf(
+		RingVerifier(&ring_verifier).verify_ring_vrf(
 			message,
 			core::iter::once(do_input(context)),
 			&proof
