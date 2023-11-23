@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand_core = { version = "0.6", default-features = false }
+#rand_core = { version = "0.6", default-features = false }
 derive-where = "1.2"
 bounded-collections = "0.1.8"
 
