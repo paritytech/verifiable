@@ -48,7 +48,7 @@ pub trait GenerateVerifiable {
     /// Root(?).
     ///
     /// This is envisioned to be stored on-chain.
-    type Intermediate: Clone + Eq + PartialEq + FullCodec + Debug /* + TypeInfo*/ + MaxEncodedLen;
+    type Intermediate: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
     /// Value identifying a single member. Corresponds to the Public Key.
     ///
     /// This is stored on-chain and also expected to be passed on-chain as a parameter.
@@ -65,7 +65,7 @@ pub trait GenerateVerifiable {
     /// A proof which can be verified.
     ///
     /// This is expected to be passed on-chain as a parameter, but never stored.
-    type Proof: Clone + Eq + PartialEq + FullCodec + Debug /* + TypeInfo*/;
+    type Proof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
     /// Begin building a `Members` value.
     fn start_members() -> Self::Intermediate;
