@@ -65,7 +65,7 @@ pub trait GenerateVerifiable {
     /// A proof which can be verified.
     ///
     /// This is expected to be passed on-chain as a parameter, but never stored.
-    type Proof: Clone + Eq + PartialEq + FullCodec + Debug;
+    type Proof: Clone + Eq + PartialEq + FullCodec + Debug /* + TypeInfo*/;
 
     /// Begin building a `Members` value.
     fn start_members() -> Self::Intermediate;
