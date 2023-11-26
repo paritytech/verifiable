@@ -90,12 +90,10 @@ pub trait GenerateVerifiable {
 	/// `Secret` for `member` and as such is practical to conduct on an offline/air-gapped device.
 	///
 	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
-	fn open<'a>(
+	fn open(
 		member: &Self::Member,
-		members_iter: impl Iterator<Item = &'a Self::Member>,
-	) -> Result<Self::Commitment, ()>
-	where
-		Self::Member: 'a;
+		members_iter: impl Iterator<Item = Self::Member>,
+	) -> Result<Self::Commitment, ()>;
 
 	/// Create a proof of membership with the `commitment` using the given `secret` of the member
 	/// of the `commitment`.
@@ -154,7 +152,7 @@ pub struct Receipt<Gen: GenerateVerifiable> {
 impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	pub fn create<'a>(
 		secret: &Gen::Secret,
-		members: impl Iterator<Item = &'a Gen::Member>,
+		members: impl Iterator<Item = Gen::Member>,
 		context: &[u8],
 		message: Vec<u8>,
 	) -> Result<Self, ()>
