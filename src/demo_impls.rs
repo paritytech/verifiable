@@ -15,6 +15,7 @@ impl GenerateVerifiable for Trivial {
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = [u8; 32];
+	type Signature = [u8; 32];
 
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
@@ -83,6 +84,7 @@ impl GenerateVerifiable for Simple {
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
+	type Signature = [u8; 32];
 
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()

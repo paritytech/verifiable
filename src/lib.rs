@@ -66,6 +66,9 @@ pub trait GenerateVerifiable {
 	///
 	/// This is expected to be passed on-chain as a parameter, but never stored.
 	type Proof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
+	/// A signature, creatable from a `Secret` for a message and which can be verified as valid
+	/// with respect to the corresponding `Member`.
+	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
@@ -114,6 +117,14 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()>;
 
+	/// Make a non-anonymous signature of `message` using `secret`.
+	fn sign(
+		_secret: &Self::Secret,
+		_message: &[u8],
+	) -> Result<Self::Signature, ()> {
+		Err(())
+	}
+
 	/// Check whether `self` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
 	/// that they elected to opine `message`.
@@ -138,6 +149,14 @@ pub trait GenerateVerifiable {
 		_message: &[u8],
 	) -> Result<Alias, ()> {
 		Err(())
+	}
+
+	fn verify_signature(
+		_signature: &Self::Signature,
+		_message: &[u8],
+		_member: &Self::Member,
+	) -> bool {
+		false
 	}
 }
 
