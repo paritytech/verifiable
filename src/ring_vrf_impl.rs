@@ -1,101 +1,207 @@
 use super::*;
-use core::{
-	marker::PhantomData,
-};
-use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
-use ark_scale::{ArkScale, ArkScaleMaxEncodedLen};
+
+use ark_scale::ArkScale;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use bandersnatch_vrfs::{
-	SecretKey, PublicKey, RingVrfSignature, ring,
-	CanonicalDeserialize, // ark_serialize::
+	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingProver, RingVerifier, SecretKey,
+	Transcript, VrfInput,
 };
-use alloc::vec::Vec;
-use derive_where::derive_where;
+
+type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
+type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
+
+const DOMAIN_SIZE: usize = 1 << 16;
+
+const THIN_SIGN_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
+
+const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
+const VRF_OUTPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
+
+const THIN_SIGN_SIZE: usize = 65;
+const RING_SIGNATURE_SIZE: usize = 788;
 
 // A hack that moves the .
 pub trait Web3SumKZG: 'static {
 	fn kzg_bytes() -> &'static [u8];
-	fn kzg() -> &'static ring::KZG {
+
+	fn kzg() -> &'static bandersnatch_vrfs::ring::KZG {
 		// TODO: Find a no_std analog.  Check it supports multiple setups.
 		use std::sync::OnceLock;
-		static CELL: OnceLock<ring::KZG> = OnceLock::new();
+		static CELL: OnceLock<bandersnatch_vrfs::ring::KZG> = OnceLock::new();
 		CELL.get_or_init(|| {
-			<ring::KZG as CanonicalDeserialize>::deserialize_compressed(Self::kzg_bytes()).unwrap()
+			<bandersnatch_vrfs::ring::KZG as CanonicalDeserialize>::deserialize_compressed(
+				Self::kzg_bytes(),
+			)
+			.unwrap()
 		})
 	}
 }
 
-pub struct Test2e10;
+pub struct TestKzg;
 
-impl Web3SumKZG for Test2e10 {
+impl Web3SumKZG for TestKzg {
 	fn kzg_bytes() -> &'static [u8] {
-        &b"Hello"[..]
-//		include_bytes!("testing.kzg")
+		include_bytes!("test2e16.kzg")
 	}
 }
 
-#[derive(Encode, Decode, TypeInfo, MaxEncodedLen)]
-#[derive_where(Clone, Eq, PartialEq, Debug)]
-#[scale_info(skip_type_params(KZG))]
-pub struct BandersnatchRingVRF<KZG: 'static>(PhantomData<fn() -> &'static KZG>);
+#[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
+pub struct MembersSet(pub Vec<bandersnatch_vrfs::bandersnatch::SWAffine>);
 
-/*impl<KZG> fmt::Debug for BandersnatchRingVRF<KZG> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "BandersnatchRingVRF({:?})", self.0)
+ark_scale::impl_scale_via_ark!(MembersSet);
+
+const MEMBERS_SET_MAX_SIZE: usize = 48 * 1024;
+
+impl scale_info::TypeInfo for MembersSet {
+	type Identity = [u8; MEMBERS_SET_MAX_SIZE];
+
+	fn type_info() -> Type {
+		Self::Identity::type_info()
 	}
-}*/
-
-fn do_input(context: &[u8]) -> bandersnatch_vrfs::VrfInput {
-	use bandersnatch_vrfs::IntoVrfInput;
-    bandersnatch_vrfs::Message {
-		domain: b"Polkadot Fellowship Alias : Input",
-		message: context
-	}.into_vrf_input()
 }
 
-fn do_output(out: [bandersnatch_vrfs::VrfInOut; 1]) -> Alias {
-	out[0].vrf_output_bytes(b"Polkadot Fellowship Alias : Output")
-} 
+impl MaxEncodedLen for MembersSet {
+	fn max_encoded_len() -> usize {
+		<[u8; MEMBERS_SET_MAX_SIZE]>::max_encoded_len()
+	}
+}
 
-impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
+#[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
+pub struct MembersCommitment(bandersnatch_vrfs::ring::VerifierKey);
 
-//	fn unverified_alias(&self, context: &[u8]) -> Alias {
-//		self.0.preoutputs[0]
-//	}
+ark_scale::impl_scale_via_ark!(MembersCommitment);
 
+const MEMBERS_COMMITMENT_MAX_SIZE: usize = 4096;
+
+impl scale_info::TypeInfo for MembersCommitment {
+	type Identity = [u8; MEMBERS_COMMITMENT_MAX_SIZE];
+
+	fn type_info() -> Type {
+		Self::Identity::type_info()
+	}
+}
+
+impl MaxEncodedLen for MembersCommitment {
+	fn max_encoded_len() -> usize {
+		MEMBERS_COMMITMENT_MAX_SIZE
+	}
+}
+
+impl core::fmt::Debug for MembersCommitment {
+	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+		write!(f, "MemberCommitment")
+	}
+}
+
+impl core::cmp::PartialEq for MembersCommitment {
+	fn eq(&self, other: &Self) -> bool {
+		self.encode() == other.encode()
+	}
+}
+
+impl core::cmp::Eq for MembersCommitment {}
+
+pub struct BandersnatchVrfVerifiable;
+
+impl GenerateVerifiable for BandersnatchVrfVerifiable {
+	type Members = MembersCommitment;
+	type Intermediate = MembersSet; // TODO: @sergey THIS IS TEMPORARY
+	type Member = ArkScale<PublicKey>;
 	type Secret = SecretKey;
-	type Member = [u8; 33];
+	type Commitment = (u32, ArkScale<ProverKey>);
+	type Proof = [u8; RING_SIGNATURE_SIZE];
+	type Signature = [u8; THIN_SIGN_SIZE];
+	type StaticChunk = ();
+
+	fn start_members() -> Self::Intermediate {
+		// TODO: THIS IS A TEMPORARY FALLBACK
+		MembersSet(Vec::new())
+	}
+
+	fn push_member(
+		intermediate: &mut Self::Intermediate,
+		who: Self::Member,
+		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+	) -> Result<(), ()> {
+		// TODO: THIS IS A TEMPORARY FALLBACK
+		intermediate.0.push(who.0 .0);
+		Ok(())
+	}
+
+	fn finish_members(inter: Self::Intermediate) -> Self::Members {
+		// TODO: THIS IS A TEMPORARY FALLBACK
+		let verifier_key = TestKzg::kzg().verifier_key(inter.0);
+		MembersCommitment(verifier_key)
+	}
 
 	fn new_secret(entropy: Entropy) -> Self::Secret {
 		SecretKey::from_seed(&entropy)
 	}
+
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
-		secret.to_public().serialize()
+		secret.to_public().into()
 	}
 
-	/// TODO: Interface #2 would make this sane.
-	type Intermediate = ArkScale<Vec<bandersnatch_vrfs::bandersnatch::SWAffine>>;
+	fn open(
+		member: &Self::Member,
+		members: impl Iterator<Item = Self::Member>,
+	) -> Result<Self::Commitment, ()> {
+		let max_len: u32 = TestKzg::kzg()
+			.max_keyset_size()
+			.try_into()
+			.expect("Impossibly large a KZG, qed");
+		let mut prover_idx = u32::MAX;
+		let mut pks = Vec::with_capacity(members.size_hint().0);
+		for (idx, m) in members.enumerate() {
+			if idx as u32 >= max_len {
+				return Err(());
+			}
+			if &m == member {
+				prover_idx = idx as u32
+			}
+			pks.push(m.0 .0);
+		}
+		let prover_key = TestKzg::kzg().prover_key(pks);
 
-	type Members = ArkScale<bandersnatch_vrfs::ring::VerifierKey>;
-
-	fn start_members() -> Self::Intermediate {
-		ArkScale(Vec::with_capacity( KZG::kzg().max_keyset_size() ))
-	}
-	fn push_member(inter: &mut Self::Intermediate, who: Self::Member) -> Result<(),()> {
-        if inter.0.len() == KZG::kzg().max_keyset_size() { return Err(()); }
-		let pk = PublicKey::deserialize(&who[..]).map_err(|_| ()) ?;
-		inter.0.push(pk.0.0);
-		Ok(())
-	}
-	fn finish_members(inter: Self::Intermediate) -> Self::Members {
-		//if inter.0.len() > KZG::kzg().max_keyset_size() { return Err(()); }
-        // This is guaranteed in `push_member`.
-        // In theory, our ring-prover should pad the KZG but sergey has blatantly
-		// insecure padding right now:
-		// https://github.com/w3f/ring-proof/blob/master/ring/src/piop/params.rs#L56
-        ArkScale(KZG::kzg().verifier_key(inter.0))
+		Ok((prover_idx, prover_key.into()))
 	}
 
-    type Proof = ArkScale<RingVrfSignature<1>>;
+	fn create(
+		commitment: Self::Commitment,
+		secret: &Self::Secret,
+		context: &[u8],
+		message: &[u8],
+	) -> Result<(Self::Proof, Alias), ()> {
+		let (prover_idx, prover_key) = commitment;
+		if prover_idx >= TestKzg::kzg().max_keyset_size() as u32 {
+			return Err(());
+		}
+
+		let ring_prover = TestKzg::kzg().init_ring_prover(prover_key.0, prover_idx as usize);
+
+		let vrf_input = Message {
+			domain: VRF_INPUT_DOMAIN,
+			message: context,
+		}
+		.into_vrf_input();
+
+		let ios = [secret.vrf_inout(vrf_input)];
+
+		let signature: RingVrfSignature = RingProver {
+			ring_prover: &ring_prover,
+			secret,
+		}
+		.sign_ring_vrf(message, &ios);
+
+		let mut buf = [0u8; RING_SIGNATURE_SIZE];
+		signature
+			.serialize_compressed(buf.as_mut_slice())
+			.map_err(|_| ())?;
+
+		let alias: Alias = ios[0].vrf_output_bytes(VRF_OUTPUT_DOMAIN);
+
+		Ok((buf, alias))
+	}
 
 	fn validate(
 		proof: &Self::Proof,
@@ -103,47 +209,160 @@ impl<KZG: Web3SumKZG> GenerateVerifiable for BandersnatchRingVRF<KZG> {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
-        let ring_verifier = KZG::kzg().init_ring_verifier(members.0.clone());
- 		proof.0.verify_ring_vrf(message, core::iter::once(do_input(context)), &ring_verifier)
-		.map(do_output)
-        .map_err(|x| { let r: Result<Alias, _> = Err(x); r.unwrap(); () })
-	}
+		// TODO: use lightweight bandersnatch_vrfs::make_ring_verifier
+		let ring_verifier = TestKzg::kzg().init_ring_verifier(members.0.clone());
 
-	type Commitment = (u32, ArkScale<bandersnatch_vrfs::ring::ProverKey>);
-
-	fn open<'a>(
-		myself: &Self::Member,
-		members: impl Iterator<Item = &'a Self::Member>,
-	) -> Result<Self::Commitment, ()>
-	where
-		Self::Member: 'a,
-	{
-		let max_len: u32 = KZG::kzg().max_keyset_size().try_into().expect("Impossibly large a KZG, qed");
-		let mut i = 0u32;
-		let mut me = u32::MAX;
-		// #![feature(iterator_try_collect)]
-		let mut pks = Vec::with_capacity(members.size_hint().0);
-		for member in members {
-            if i >= max_len { return Err(()); }
-			if myself == member { me = i }
-			pks.push(PublicKey::deserialize(&member[..]).map_err(|_| ())?.0.0);
-			i += 1;
+		let vrf_input = Message {
+			domain: VRF_INPUT_DOMAIN,
+			message: context,
 		}
-		if me == u32::MAX { return Err(()); }
-		Ok(( me, ArkScale(KZG::kzg().prover_key(pks)) ))
+		.into_vrf_input();
+
+		let ring_signature =
+			RingVrfSignature::deserialize_compressed(proof.as_slice()).map_err(|_| ())?;
+
+		let ios = RingVerifier(&ring_verifier)
+			.verify_ring_vrf(message, core::iter::once(vrf_input), &ring_signature)
+			.map_err(|_| ())?;
+
+		let alias: Alias = ios[0].vrf_output_bytes(VRF_OUTPUT_DOMAIN);
+		Ok(alias)
 	}
 
-	fn create(
-		// Sergey TODO: This should be a borrow but ring-prover still consumes it.
-		(me, members): Self::Commitment,
-		secret: &Self::Secret,
-		context: &[u8],
+	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
+		let mut transcript = Transcript::new_labeled(THIN_SIGN_CONTEXT);
+		transcript.append_slice(message);
+		let signature = secret.sign_thin_vrf(transcript, &[]);
+		let mut raw = [0u8; THIN_SIGN_SIZE];
+		signature
+			.serialize_compressed(raw.as_mut_slice())
+			.map_err(|_| ())?;
+		Ok(raw)
+	}
+
+	fn verify_signature(
+		signature: &Self::Signature,
 		message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
-		assert!((me as usize) < KZG::kzg().max_keyset_size());
-		let io: [_; 1] = [secret.0.vrf_inout(do_input(context))];
-        let ring_prover = KZG::kzg().init_ring_prover(members.0, me as usize);
-        let signature: RingVrfSignature<1> = secret.sign_ring_vrf(message, &io, &ring_prover);
-        Ok(( ArkScale(signature), do_output(io) ))
+		member: &Self::Member,
+	) -> bool {
+		let signature: ThinVrfSignature =
+			ThinVrfSignature::deserialize_compressed(signature.as_slice()).unwrap();
+		let mut transcript = Transcript::new_labeled(THIN_SIGN_CONTEXT);
+		transcript.append_slice(message);
+		member
+			.0
+			.verify_thin_vrf(transcript, core::iter::empty::<VrfInput>(), &signature)
+			.is_ok()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	#[ignore = "Build a test KZG"]
+	fn build_static_kzg() {
+		println!("Building testing KZG");
+
+		let path = std::path::Path::new("src/test2e16.kzg");
+		use std::fs::OpenOptions;
+		let mut oo = OpenOptions::new();
+		oo.read(true).write(true).create(true).truncate(true);
+		if let Ok(mut file) = oo.open(path) {
+			let kzg = bandersnatch_vrfs::ring::KZG::insecure_kzg_setup(
+				DOMAIN_SIZE as u32,
+				&mut rand_core::OsRng,
+			);
+
+			kzg.serialize_compressed(&mut file).unwrap_or_else(|why| {
+				panic!("couldn't write {}: {}", path.display(), why);
+			});
+		}
+	}
+
+	#[test]
+	fn start_push_finish() {
+		let alice_sec = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
+		let bob_sec = BandersnatchVrfVerifiable::new_secret([1u8; 32]);
+		let chalie_sec = BandersnatchVrfVerifiable::new_secret([2u8; 32]);
+
+		let alice = BandersnatchVrfVerifiable::member_from_secret(&alice_sec);
+		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
+		let charlie = BandersnatchVrfVerifiable::member_from_secret(&chalie_sec);
+
+		let mut inter = BandersnatchVrfVerifiable::start_members();
+		BandersnatchVrfVerifiable::push_member(&mut inter, alice.clone(), |_| Ok(())).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter, bob.clone(), |_| Ok(())).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter, charlie.clone(), |_| Ok(())).unwrap();
+		let _members = BandersnatchVrfVerifiable::finish_members(inter);
+	}
+
+	#[test]
+	fn test_plain_signature() {
+		let msg = b"asd";
+		let secret = BandersnatchVrfVerifiable::new_secret([0; 32]);
+		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
+		let signature = BandersnatchVrfVerifiable::sign(&secret, msg).unwrap();
+		let res = BandersnatchVrfVerifiable::verify_signature(&signature, msg, &public);
+		assert!(res);
+	}
+
+	#[test]
+	fn test_open() {
+		use std::time::Instant;
+
+		let context = b"Context";
+		let message = b"FooBar";
+
+		let members: Vec<_> = (0..10)
+			.map(|i| {
+				let secret = BandersnatchVrfVerifiable::new_secret([i as u8; 32]);
+				BandersnatchVrfVerifiable::member_from_secret(&secret)
+			})
+			.collect();
+		let member = members[3].clone();
+
+		let start = Instant::now();
+		let commitment =
+			BandersnatchVrfVerifiable::open(&member, members.clone().into_iter()).unwrap();
+		// Commitment is ~49 MB
+		let buf = commitment.encode();
+		println!(
+			"Commitment size: {} bytes, duration: {} ms",
+			buf.len(),
+			(Instant::now() - start).as_millis()
+		);
+
+		let secret = BandersnatchVrfVerifiable::new_secret([commitment.0 as u8; 32]);
+		let (proof, alias) =
+			BandersnatchVrfVerifiable::create(commitment, &secret, context, message).unwrap();
+		let buf = proof.encode();
+		println!("Proof size: {}", buf.len()); // ~49MB
+
+		let start = Instant::now();
+		let mut inter = BandersnatchVrfVerifiable::start_members();
+		members.iter().for_each(|member| {
+			BandersnatchVrfVerifiable::push_member(&mut inter, member.clone(), |_| Ok(())).unwrap();
+		});
+		println!(
+			"Push members duration {} ms",
+			(Instant::now() - start).as_millis()
+		);
+		let start = Instant::now();
+		let members = BandersnatchVrfVerifiable::finish_members(inter);
+		println!(
+			"Finish members duration {} ms",
+			(Instant::now() - start).as_millis()
+		);
+
+		let start = Instant::now();
+		let alias2 =
+			BandersnatchVrfVerifiable::validate(&proof, &members, context, message).unwrap();
+		println!(
+			"Validate duration {} ms",
+			(Instant::now() - start).as_millis()
+		);
+		assert_eq!(alias, alias2);
 	}
 }
