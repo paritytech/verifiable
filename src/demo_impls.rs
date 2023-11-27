@@ -16,11 +16,12 @@ impl GenerateVerifiable for Trivial {
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = [u8; 32];
 	type Signature = [u8; 32];
+	type StaticChunk = ();
 
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
 	}
-	fn push_member(inter: &mut Self::Intermediate, who: Self::Member) -> Result<(), ()> {
+	fn push_member(inter: &mut Self::Intermediate, who: Self::Member, _lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>) -> Result<(), ()> {
 		inter.try_push(who).map_err(|_| ())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
@@ -85,11 +86,12 @@ impl GenerateVerifiable for Simple {
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
 	type Signature = [u8; 32];
+	type StaticChunk = ();
 
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
 	}
-	fn push_member(inter: &mut Self::Intermediate, who: Self::Member) -> Result<(), ()> {
+	fn push_member(inter: &mut Self::Intermediate, who: Self::Member, _lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>) -> Result<(), ()> {
 		inter.try_push(who).map_err(|_| ())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
