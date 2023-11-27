@@ -69,11 +69,14 @@ pub trait GenerateVerifiable {
 	/// A signature, creatable from a `Secret` for a message and which can be verified as valid
 	/// with respect to the corresponding `Member`.
 	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
+	
+	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
 	/// Introduce a new `Member` into the intermediate value used to build a new `Members` value.
-	fn push_member(intermediate: &mut Self::Intermediate, who: Self::Member) -> Result<(), ()>;
+	fn push_member(intermediate: &mut Self::Intermediate, who: Self::Member, lookup: Fn(usize) -> Result<StaticChunk, ()>) -> Result<(), ()>;
+	// push_members
 	/// Consume the `intermediate` value to create a new `Members` value.
 	fn finish_members(inter: Self::Intermediate) -> Self::Members;
 
