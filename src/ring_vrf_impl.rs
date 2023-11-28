@@ -61,7 +61,7 @@ pub struct MembersCommitment(bandersnatch_vrfs::ring::VerifierKey);
 
 ark_scale::impl_scale_via_ark!(MembersCommitment);
 
-const MEMBERS_COMMITMENT_MAX_SIZE: usize = 4096;
+const MEMBERS_COMMITMENT_MAX_SIZE: usize = 512;
 
 impl scale_info::TypeInfo for MembersCommitment {
 	type Identity = [u8; MEMBERS_COMMITMENT_MAX_SIZE];
@@ -325,11 +325,15 @@ mod tests {
 	}
 
 	#[test]
-	fn test_open() {
+	fn open_validate_works() {
 		use std::time::Instant;
 
 		let context = b"Context";
 		let message = b"FooBar";
+
+		let start = Instant::now();
+		let _ = kzg();
+		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
 
 		let members: Vec<_> = (0..10)
 			.map(|i| {
@@ -342,43 +346,32 @@ mod tests {
 		let start = Instant::now();
 		let commitment =
 			BandersnatchVrfVerifiable::open(&member, members.clone().into_iter()).unwrap();
-		// Commitment is ~49 MB
-		let buf = commitment.encode();
-		println!(
-			"Commitment size: {} bytes, duration: {} ms",
-			buf.len(),
-			(Instant::now() - start).as_millis()
-		);
+		println!("* Open: {} ms", (Instant::now() - start).as_millis());
+		println!("  Commitment size: {} bytes", commitment.encode().len()); // ~49 MB
 
 		let secret = BandersnatchVrfVerifiable::new_secret([commitment.0 as u8; 32]);
+		let start = Instant::now();
 		let (proof, alias) =
 			BandersnatchVrfVerifiable::create(commitment, &secret, context, message).unwrap();
-		let buf = proof.encode();
-		println!("Proof size: {}", buf.len()); // ~49MB
+		println!("* Create: {} ms", (Instant::now() - start).as_millis());
+		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
-		let start = Instant::now();
 		let mut inter = BandersnatchVrfVerifiable::start_members();
 		members.iter().for_each(|member| {
 			BandersnatchVrfVerifiable::push_member(&mut inter, member.clone(), |_| Ok(())).unwrap();
 		});
-		println!(
-			"Push members duration {} ms",
-			(Instant::now() - start).as_millis()
-		);
+
 		let start = Instant::now();
 		let members = BandersnatchVrfVerifiable::finish_members(inter);
 		println!(
-			"Finish members duration {} ms",
+			"* Finish members: {} ms",
 			(Instant::now() - start).as_millis()
 		);
 
 		let start = Instant::now();
 		let alias2 =
 			BandersnatchVrfVerifiable::validate(&proof, &members, context, message).unwrap();
-		println!(
-			"Validate duration {} ms",
-			(Instant::now() - start).as_millis()
-		);
+		println!("* Validate {} ms", (Instant::now() - start).as_millis());
 		assert_eq!(alias, alias2);
 	}
 }
