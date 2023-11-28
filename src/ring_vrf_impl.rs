@@ -14,12 +14,12 @@ type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
 
 const DOMAIN_SIZE: usize = 1 << 16;
 
-const THIN_SIGN_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
+const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
 const VRF_OUTPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
 
-const THIN_SIGN_SIZE: usize = 65;
+const THIN_SIGNATURE_SIZE: usize = 65;
 const RING_SIGNATURE_SIZE: usize = 788;
 
 #[cfg(feature = "std")]
@@ -107,7 +107,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Secret = SecretKey;
 	type Commitment = (u32, ArkScale<ProverKey>);
 	type Proof = [u8; RING_SIGNATURE_SIZE];
-	type Signature = [u8; THIN_SIGN_SIZE];
+	type Signature = [u8; THIN_SIGNATURE_SIZE];
 	type StaticChunk = ();
 
 	fn start_members() -> Self::Intermediate {
@@ -175,10 +175,10 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
-		let mut transcript = Transcript::new_labeled(THIN_SIGN_CONTEXT);
+		let mut transcript = Transcript::new_labeled(THIN_SIGNATURE_CONTEXT);
 		transcript.append_slice(message);
 		let signature = secret.sign_thin_vrf(transcript, &[]);
-		let mut raw = [0u8; THIN_SIGN_SIZE];
+		let mut raw = [0u8; THIN_SIGNATURE_SIZE];
 		signature
 			.serialize_compressed(raw.as_mut_slice())
 			.map_err(|_| ())?;
@@ -192,7 +192,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> bool {
 		let signature: ThinVrfSignature =
 			ThinVrfSignature::deserialize_compressed(signature.as_slice()).unwrap();
-		let mut transcript = Transcript::new_labeled(THIN_SIGN_CONTEXT);
+		let mut transcript = Transcript::new_labeled(THIN_SIGNATURE_CONTEXT);
 		transcript.append_slice(message);
 		member
 			.0
