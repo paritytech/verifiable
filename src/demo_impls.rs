@@ -1,5 +1,6 @@
 use super::*;
 use bounded_collections::{BoundedVec, ConstU32};
+use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
 // Example impls:
 

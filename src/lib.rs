@@ -1,13 +1,13 @@
-// #![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 extern crate core;
 
 use alloc::vec::Vec;
+
 use core::fmt::Debug;
 use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
-use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
 pub mod demo_impls;
 pub mod ring_vrf_impl;

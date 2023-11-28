@@ -3,9 +3,11 @@ use super::*;
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use bandersnatch_vrfs::{
-	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingProver, RingVerifier, SecretKey,
-	Transcript, VrfInput,
+	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
+	VrfInput,
 };
+#[cfg(feature = "std")]
+use bandersnatch_vrfs::{ring::KZG, RingProver};
 
 type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
@@ -20,24 +22,17 @@ const VRF_OUTPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
 const THIN_SIGN_SIZE: usize = 65;
 const RING_SIGNATURE_SIZE: usize = 788;
 
-pub struct TestKzg;
+#[cfg(feature = "std")]
+static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
 
-impl TestKzg {
-	fn kzg_bytes() -> &'static [u8] {
-		include_bytes!("test2e16.kzg")
-	}
-
-	fn kzg() -> &'static bandersnatch_vrfs::ring::KZG {
-		// TODO: Find a no_std analog.  Check it supports multiple setups.
-		use std::sync::OnceLock;
-		static CELL: OnceLock<bandersnatch_vrfs::ring::KZG> = OnceLock::new();
-		CELL.get_or_init(|| {
-			<bandersnatch_vrfs::ring::KZG as CanonicalDeserialize>::deserialize_compressed(
-				Self::kzg_bytes(),
-			)
+#[cfg(feature = "std")]
+fn kzg() -> &'static KZG {
+	use std::sync::OnceLock;
+	static CELL: OnceLock<KZG> = OnceLock::new();
+	CELL.get_or_init(|| {
+		<bandersnatch_vrfs::ring::KZG as CanonicalDeserialize>::deserialize_compressed(KZG_BYTES)
 			.unwrap()
-		})
-	}
+	})
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
@@ -123,10 +118,16 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Ok(())
 	}
 
+	#[cfg(feature = "std")]
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
-		// TODO: THIS IS A TEMPORARY FALLBACK
-		let verifier_key = TestKzg::kzg().verifier_key(inter.0);
+		// TODO: THIS IS A TEMPORARY FALLBACK AND SHOULD WORK ON NO-STD
+		let verifier_key = kzg().verifier_key(inter.0);
 		MembersCommitment(verifier_key)
+	}
+
+	#[cfg(not(feature = "std"))]
+	fn finish_members(_: Self::Intermediate) -> Self::Members {
+		panic!("Not implemented YET!!!, This should be implemented for no-std as well")
 	}
 
 	fn new_secret(entropy: Entropy) -> Self::Secret {
@@ -137,11 +138,12 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		secret.to_public().into()
 	}
 
+	#[cfg(feature = "std")]
 	fn open(
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
-		let max_len: u32 = TestKzg::kzg()
+		let max_len: u32 = kzg()
 			.max_keyset_size()
 			.try_into()
 			.expect("Impossibly large a KZG, qed");
@@ -156,46 +158,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			}
 			pks.push(m.0 .0);
 		}
-		let prover_key = TestKzg::kzg().prover_key(pks);
+		let prover_key = kzg().prover_key(pks);
 
 		Ok((prover_idx, prover_key.into()))
-	}
-
-	fn create(
-		commitment: Self::Commitment,
-		secret: &Self::Secret,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
-		let (prover_idx, prover_key) = commitment;
-		if prover_idx >= TestKzg::kzg().max_keyset_size() as u32 {
-			return Err(());
-		}
-
-		let ring_prover = TestKzg::kzg().init_ring_prover(prover_key.0, prover_idx as usize);
-
-		let vrf_input = Message {
-			domain: VRF_INPUT_DOMAIN,
-			message: context,
-		}
-		.into_vrf_input();
-
-		let ios = [secret.vrf_inout(vrf_input)];
-
-		let signature: RingVrfSignature = RingProver {
-			ring_prover: &ring_prover,
-			secret,
-		}
-		.sign_ring_vrf(message, &ios);
-
-		let mut buf = [0u8; RING_SIGNATURE_SIZE];
-		signature
-			.serialize_compressed(buf.as_mut_slice())
-			.map_err(|_| ())?;
-
-		let alias: Alias = ios[0].vrf_output_bytes(VRF_OUTPUT_DOMAIN);
-
-		Ok((buf, alias))
 	}
 
 	fn validate(
@@ -208,7 +173,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
 		let ring_verifier =
 			bandersnatch_vrfs::ring::make_ring_verifier(members.0.clone(), DOMAIN_SIZE);
-		// let ring_verifier = TestKzg::kzg().init_ring_verifier(members.0.clone());
+		// let ring_verifier = kzg().init_ring_verifier(members.0.clone());
 
 		let vrf_input = Message {
 			domain: VRF_INPUT_DOMAIN,
@@ -252,6 +217,62 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			.verify_thin_vrf(transcript, core::iter::empty::<VrfInput>(), &signature)
 			.is_ok()
 	}
+
+	#[cfg(not(feature = "std"))]
+	fn open(
+		_member: &Self::Member,
+		_members: impl Iterator<Item = Self::Member>,
+	) -> Result<Self::Commitment, ()> {
+		panic!("Not implemented")
+	}
+
+	#[cfg(feature = "std")]
+	fn create(
+		commitment: Self::Commitment,
+		secret: &Self::Secret,
+		context: &[u8],
+		message: &[u8],
+	) -> Result<(Self::Proof, Alias), ()> {
+		let (prover_idx, prover_key) = commitment;
+		if prover_idx >= kzg().max_keyset_size() as u32 {
+			return Err(());
+		}
+
+		let ring_prover = kzg().init_ring_prover(prover_key.0, prover_idx as usize);
+
+		let vrf_input = Message {
+			domain: VRF_INPUT_DOMAIN,
+			message: context,
+		}
+		.into_vrf_input();
+
+		let ios = [secret.vrf_inout(vrf_input)];
+
+		let signature: RingVrfSignature = RingProver {
+			ring_prover: &ring_prover,
+			secret,
+		}
+		.sign_ring_vrf(message, &ios);
+
+		let mut buf = [0u8; RING_SIGNATURE_SIZE];
+		signature
+			.serialize_compressed(buf.as_mut_slice())
+			.map_err(|_| ())?;
+
+		let alias: Alias = ios[0].vrf_output_bytes(VRF_OUTPUT_DOMAIN);
+
+		Ok((buf, alias))
+	}
+
+	#[cfg(not(feature = "std"))]
+	fn create(
+		_commitment: Self::Commitment,
+		_secret: &Self::Secret,
+		_context: &[u8],
+		_message: &[u8],
+	) -> Result<(Self::Proof, Alias), ()> {
+		panic!("Not implemented")
+	}
 }
 
 #[cfg(test)]
@@ -268,10 +289,7 @@ mod tests {
 		let mut oo = OpenOptions::new();
 		oo.read(true).write(true).create(true).truncate(true);
 		if let Ok(mut file) = oo.open(path) {
-			let kzg = bandersnatch_vrfs::ring::KZG::insecure_kzg_setup(
-				DOMAIN_SIZE as u32,
-				&mut rand_core::OsRng,
-			);
+			let kzg = KZG::insecure_kzg_setup(DOMAIN_SIZE as u32, &mut rand_core::OsRng);
 
 			kzg.serialize_compressed(&mut file).unwrap_or_else(|why| {
 				panic!("couldn't write {}: {}", path.display(), why);
