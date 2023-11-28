@@ -209,8 +209,11 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
-		// TODO: use lightweight bandersnatch_vrfs::make_ring_verifier
-		let ring_verifier = TestKzg::kzg().init_ring_verifier(members.0.clone());
+		// This doesn't require the whole kzg. Thus is more appropriate if used on-chain
+		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
+		let ring_verifier =
+			bandersnatch_vrfs::ring::make_ring_verifier(members.0.clone(), DOMAIN_SIZE);
+		// let ring_verifier = TestKzg::kzg().init_ring_verifier(members.0.clone());
 
 		let vrf_input = Message {
 			domain: VRF_INPUT_DOMAIN,
