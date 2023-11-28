@@ -20,9 +20,12 @@ const VRF_OUTPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
 const THIN_SIGN_SIZE: usize = 65;
 const RING_SIGNATURE_SIZE: usize = 788;
 
-// A hack that moves the .
-pub trait Web3SumKZG: 'static {
-	fn kzg_bytes() -> &'static [u8];
+pub struct TestKzg;
+
+impl TestKzg {
+	fn kzg_bytes() -> &'static [u8] {
+		include_bytes!("test2e16.kzg")
+	}
 
 	fn kzg() -> &'static bandersnatch_vrfs::ring::KZG {
 		// TODO: Find a no_std analog.  Check it supports multiple setups.
@@ -34,14 +37,6 @@ pub trait Web3SumKZG: 'static {
 			)
 			.unwrap()
 		})
-	}
-}
-
-pub struct TestKzg;
-
-impl Web3SumKZG for TestKzg {
-	fn kzg_bytes() -> &'static [u8] {
-		include_bytes!("test2e16.kzg")
 	}
 }
 
