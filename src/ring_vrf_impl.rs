@@ -138,31 +138,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		secret.to_public().into()
 	}
 
-	#[cfg(feature = "std")]
-	fn open(
-		member: &Self::Member,
-		members: impl Iterator<Item = Self::Member>,
-	) -> Result<Self::Commitment, ()> {
-		let max_len: u32 = kzg()
-			.max_keyset_size()
-			.try_into()
-			.expect("Impossibly large a KZG, qed");
-		let mut prover_idx = u32::MAX;
-		let mut pks = Vec::with_capacity(members.size_hint().0);
-		for (idx, m) in members.enumerate() {
-			if idx as u32 >= max_len {
-				return Err(());
-			}
-			if &m == member {
-				prover_idx = idx as u32
-			}
-			pks.push(m.0 .0);
-		}
-		let prover_key = kzg().prover_key(pks);
-
-		Ok((prover_idx, prover_key.into()))
-	}
-
 	fn validate(
 		proof: &Self::Proof,
 		members: &Self::Members,
@@ -216,6 +191,31 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			.0
 			.verify_thin_vrf(transcript, core::iter::empty::<VrfInput>(), &signature)
 			.is_ok()
+	}
+
+	#[cfg(feature = "std")]
+	fn open(
+		member: &Self::Member,
+		members: impl Iterator<Item = Self::Member>,
+	) -> Result<Self::Commitment, ()> {
+		let max_len: u32 = kzg()
+			.max_keyset_size()
+			.try_into()
+			.expect("Impossibly large a KZG, qed");
+		let mut prover_idx = u32::MAX;
+		let mut pks = Vec::with_capacity(members.size_hint().0);
+		for (idx, m) in members.enumerate() {
+			if idx as u32 >= max_len {
+				return Err(());
+			}
+			if &m == member {
+				prover_idx = idx as u32
+			}
+			pks.push(m.0 .0);
+		}
+		let prover_key = kzg().prover_key(pks);
+
+		Ok((prover_idx, prover_key.into()))
 	}
 
 	#[cfg(not(feature = "std"))]
