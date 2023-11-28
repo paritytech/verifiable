@@ -25,13 +25,20 @@ const RING_SIGNATURE_SIZE: usize = 788;
 #[cfg(feature = "std")]
 static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
 
+// Some naive benchmarking for deserialization of KZG with domain size 2^16
+// - compressed + checked = ~16 s
+// - uncompressed + checked = ~12 s
+// - compressed + unchecked = ~5 s
+// - uncompressed + unchecked = 211 ms  <<<<<<<<<<<<<<<<<<<
 #[cfg(feature = "std")]
 fn kzg() -> &'static KZG {
 	use std::sync::OnceLock;
 	static CELL: OnceLock<KZG> = OnceLock::new();
 	CELL.get_or_init(|| {
-		<bandersnatch_vrfs::ring::KZG as CanonicalDeserialize>::deserialize_compressed(KZG_BYTES)
-			.unwrap()
+		<bandersnatch_vrfs::ring::KZG as CanonicalDeserialize>::deserialize_compressed_unchecked(
+			KZG_BYTES,
+		)
+		.unwrap()
 	})
 }
 
