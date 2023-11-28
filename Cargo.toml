@@ -14,6 +14,8 @@ schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_ba
 ark-serialize = { version = "0.4", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.11", default-features = false }
 bandersnatch_vrfs = { git = "https://github.com/w3f/ring-vrf.git" }
+ring = { path = "../../w3f/ring-proof/ring" }
+fflonk = { git = "https://github.com/w3f/fflonk", default-features = false }
 
 [dev-dependencies]
 rand_core = "0.6"
@@ -28,7 +30,11 @@ std = [
   "ark-serialize/std",
   "ark-scale/std",
   "bandersnatch_vrfs/std",
+  #TODO
 ]
 
 [patch."https://github.com/w3f/ring-proof"]
-ring = { path = "/mnt/ssd/develop/w3f/ring-proof/ring" }
+ring = { path = "../../w3f/ring-proof/ring" }
+
+[patch."https://github.com/w3f/fflonk"]
+fflonk = { path = "../../w3f/fflonk" }

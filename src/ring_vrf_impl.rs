@@ -1,13 +1,19 @@
-use super::*;
-
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use bandersnatch_vrfs::{
-	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
+	IntoVrfInput, Message, PublicKey, ring::ProverKey, RingVerifier, SecretKey, Transcript,
 	VrfInput,
 };
 #[cfg(feature = "std")]
 use bandersnatch_vrfs::{ring::KZG, RingProver};
+use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
+use bandersnatch_vrfs::bls12_381::Bls12_381;
+use bandersnatch_vrfs::ring::VerifierKey;
+use fflonk::pcs::kzg::params::RawKzgVerifierKey;
+use ring::{Domain, FixedColumnsCommitted};
+use ring::ring::{Ring, RingBuilderKey};
+
+use super::*;
 
 type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
@@ -43,11 +49,15 @@ fn kzg() -> &'static KZG {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
-pub struct MembersSet(pub Vec<bandersnatch_vrfs::bandersnatch::SWAffine>);
+pub struct MembersSet{
+	ring: Ring<bandersnatch_vrfs::bls12_381::Fr, Bls12_381, BandersnatchConfig>,
+    kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
+	ring_selector: bandersnatch_vrfs::bls12_381::G1Affine,
+}
 
 ark_scale::impl_scale_via_ark!(MembersSet);
 
-const MEMBERS_SET_MAX_SIZE: usize = 48 * 1024;
+const MEMBERS_SET_MAX_SIZE: usize = 48 * 1024; //TODO
 
 impl scale_info::TypeInfo for MembersSet {
 	type Identity = [u8; MEMBERS_SET_MAX_SIZE];
@@ -100,41 +110,65 @@ impl core::cmp::Eq for MembersCommitment {}
 
 pub struct BandersnatchVrfVerifiable;
 
+pub fn make_piop_params(domain_size: usize) -> ring::PiopParams<bandersnatch_vrfs::bls12_381::Fr, BandersnatchConfig> {
+	let domain = Domain::new(domain_size, true);
+	let seed = ring::find_complement_point::<BandersnatchConfig>();
+	ring::PiopParams::setup(domain, bandersnatch_vrfs::BLINDING_BASE, seed)
+}
+
+pub struct SetupKey {
+	kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
+	ring_builder_key: RingBuilderKey<bandersnatch_vrfs::bls12_381::Fr, Bls12_381>,
+}
+
 impl GenerateVerifiable for BandersnatchVrfVerifiable {
+	type MembersSetupKey = SetupKey;
 	type Members = MembersCommitment;
-	type Intermediate = MembersSet; // TODO: @sergey THIS IS TEMPORARY
+	type Intermediate = MembersSet;
 	type Member = ArkScale<PublicKey>;
 	type Secret = SecretKey;
 	type Commitment = (u32, ArkScale<ProverKey>);
 	type Proof = [u8; RING_SIGNATURE_SIZE];
 	type Signature = [u8; THIN_SIGNATURE_SIZE];
-	type StaticChunk = ();
+	type StaticChunk = ArkScale<bandersnatch_vrfs::bls12_381::G1Affine>;
 
-	fn start_members() -> Self::Intermediate {
-		// TODO: THIS IS A TEMPORARY FALLBACK
-		MembersSet(Vec::new())
+	fn start_members(params: &Self::MembersSetupKey) -> Self::Intermediate {
+		let piop_params = make_piop_params(65536);
+		let ring_selector = params.ring_builder_key.ring_selector(&piop_params);
+		MembersSet {
+			ring: Ring::<bandersnatch_vrfs::bls12_381::Fr, Bls12_381, BandersnatchConfig>::empty(&piop_params, &params.ring_builder_key.lis_in_g1, params.ring_builder_key.g1),
+			kzg_raw_vk: params.kzg_raw_vk.clone(),
+			ring_selector,
+		}
 	}
 
 	fn push_member(
 		intermediate: &mut Self::Intermediate,
 		who: Self::Member,
-		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
 	) -> Result<(), ()> {
-		// TODO: THIS IS A TEMPORARY FALLBACK
-		intermediate.0.push(who.0 .0);
+		let curr_size = intermediate.ring.curr_keys + 1;
+		let srs_point = lookup(curr_size)?;
+		let new_ring = intermediate.ring.clone().append(&[who.0.0], &[srs_point.0]);
+		*intermediate = MembersSet { ring: new_ring, kzg_raw_vk: intermediate.kzg_raw_vk.clone(), ring_selector: intermediate.ring_selector } ;
 		Ok(())
 	}
 
-	#[cfg(feature = "std")]
+	// #[cfg(feature = "std")]
+	// fn finish_members(inter: Self::Intermediate) -> Self::Members {
+	// 	// TODO: THIS IS A TEMPORARY FALLBACK AND SHOULD WORK ON NO-STD
+	// 	let verifier_key = kzg().verifier_key(inter.0);
+	// 	MembersCommitment(verifier_key)
+	// }
+	//
+	// #[cfg(not(feature = "std"))]
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
-		// TODO: THIS IS A TEMPORARY FALLBACK AND SHOULD WORK ON NO-STD
-		let verifier_key = kzg().verifier_key(inter.0);
+		let fixed_columns_committed = FixedColumnsCommitted::from_ring(inter.ring, inter.ring_selector);
+		let verifier_key = VerifierKey {
+			pcs_raw_vk: inter.kzg_raw_vk.clone(),
+			fixed_columns_committed: fixed_columns_committed.clone(),
+		};
 		MembersCommitment(verifier_key)
-	}
-
-	#[cfg(not(feature = "std"))]
-	fn finish_members(_: Self::Intermediate) -> Self::Members {
-		panic!("Not implemented YET!!!, This should be implemented for no-std as well")
 	}
 
 	fn new_secret(entropy: Entropy) -> Self::Secret {
