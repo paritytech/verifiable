@@ -10,7 +10,6 @@ use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
 use bandersnatch_vrfs::bls12_381::Bls12_381;
 use bandersnatch_vrfs::ring::VerifierKey;
 use fflonk::pcs::kzg::params::RawKzgVerifierKey;
-use ring::{Domain, FixedColumnsCommitted};
 use ring::ring::{Ring, RingBuilderKey, SrsSegment};
 
 use super::*;
@@ -41,7 +40,7 @@ fn kzg() -> &'static KZG {
 	use std::sync::OnceLock;
 	static CELL: OnceLock<KZG> = OnceLock::new();
 	CELL.get_or_init(|| {
-		<bandersnatch_vrfs::ring::KZG as CanonicalDeserialize>::deserialize_compressed_unchecked(
+		<KZG as CanonicalDeserialize>::deserialize_compressed_unchecked(
 			KZG_BYTES,
 		)
 		.unwrap()
@@ -52,7 +51,6 @@ fn kzg() -> &'static KZG {
 pub struct MembersSet{
 	ring: Ring<bandersnatch_vrfs::bls12_381::Fr, Bls12_381, BandersnatchConfig>,
     kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
-	ring_selector: bandersnatch_vrfs::bls12_381::G1Affine,
 }
 
 ark_scale::impl_scale_via_ark!(MembersSet);
@@ -74,7 +72,7 @@ impl MaxEncodedLen for MembersSet {
 }
 
 #[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
-pub struct MembersCommitment(bandersnatch_vrfs::ring::VerifierKey);
+pub struct MembersCommitment(VerifierKey);
 
 ark_scale::impl_scale_via_ark!(MembersCommitment);
 
@@ -110,12 +108,6 @@ impl core::cmp::Eq for MembersCommitment {}
 
 pub struct BandersnatchVrfVerifiable;
 
-pub fn make_piop_params(domain_size: usize) -> ring::PiopParams<bandersnatch_vrfs::bls12_381::Fr, BandersnatchConfig> {
-	let domain = Domain::new(domain_size, true);
-	let seed = ring::find_complement_point::<BandersnatchConfig>();
-	ring::PiopParams::setup(domain, bandersnatch_vrfs::BLINDING_BASE, seed)
-}
-
 pub struct SetupKey {
 	kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
 	ring_builder_key: RingBuilderKey<bandersnatch_vrfs::bls12_381::Fr, Bls12_381>,
@@ -133,12 +125,10 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type StaticChunk = ArkScale<bandersnatch_vrfs::bls12_381::G1Affine>;
 
 	fn start_members(params: &Self::MembersSetupKey) -> Self::Intermediate {
-		let piop_params = make_piop_params(1 << 9);
-		let ring_selector = params.ring_builder_key.ring_selector(&piop_params);
+		let piop_params = bandersnatch_vrfs::ring::make_piop_params(DOMAIN_SIZE);
 		MembersSet {
 			ring: Ring::<bandersnatch_vrfs::bls12_381::Fr, Bls12_381, BandersnatchConfig>::empty(&piop_params, &params.ring_builder_key.lis_in_g1, params.ring_builder_key.g1),
 			kzg_raw_vk: params.kzg_raw_vk.clone(),
-			ring_selector,
 		}
 	}
 
@@ -151,25 +141,12 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let srs_point = lookup(curr_size)?;
 		let srs_point = [srs_point.0];
 		let srs_segment = SrsSegment::<Bls12_381>::shift(&srs_point, curr_size);
-		let new_ring = intermediate.ring.clone().append(&[who.0.0], &srs_segment);
-		*intermediate = MembersSet { ring: new_ring, kzg_raw_vk: intermediate.kzg_raw_vk.clone(), ring_selector: intermediate.ring_selector } ;
+		intermediate.ring.append(&[who.0.0], &srs_segment);
 		Ok(())
 	}
 
-	// #[cfg(feature = "std")]
-	// fn finish_members(inter: Self::Intermediate) -> Self::Members {
-	// 	// TODO: THIS IS A TEMPORARY FALLBACK AND SHOULD WORK ON NO-STD
-	// 	let verifier_key = kzg().verifier_key(inter.0);
-	// 	MembersCommitment(verifier_key)
-	// }
-	//
-	// #[cfg(not(feature = "std"))]
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
-		let fixed_columns_committed = FixedColumnsCommitted::from_ring(inter.ring, inter.ring_selector);
-		let verifier_key = VerifierKey {
-			pcs_raw_vk: inter.kzg_raw_vk.clone(),
-			fixed_columns_committed: fixed_columns_committed.clone(),
-		};
+		let verifier_key = VerifierKey::from_ring_and_kzg_vk(&inter.ring, inter.kzg_raw_vk);
 		MembersCommitment(verifier_key)
 	}
 
