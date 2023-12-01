@@ -75,7 +75,11 @@ pub trait GenerateVerifiable {
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	/// Begin building a `Members` value.
-	fn start_members(params: &Self::MembersSetupKey) -> Self::Intermediate;
+	fn start_members(
+		vk: Self::MembersSetupKey,
+		lookup: impl Fn(usize, usize) -> Result<Vec<Self::StaticChunk>, ()>
+	) -> Self::Intermediate;
+
 	/// Introduce a new `Member` into the intermediate value used to build a new `Members` value.
 	fn push_member(
 		intermediate: &mut Self::Intermediate,
