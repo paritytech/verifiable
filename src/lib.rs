@@ -9,7 +9,7 @@ use core::fmt::Debug;
 use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
-pub mod demo_impls;
+// pub mod demo_impls;
 pub mod ring_vrf_impl;
 
 // Fixed types:
@@ -40,6 +40,8 @@ pub type Entropy = [u8; 32];
 /// A convenience `Receipt` type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
 pub trait GenerateVerifiable {
+	type MembersSetupKey;
+
 	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
 	///
 	/// This is envisioned to be stored on-chain and passed between chains.
@@ -73,7 +75,7 @@ pub trait GenerateVerifiable {
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	/// Begin building a `Members` value.
-	fn start_members() -> Self::Intermediate;
+	fn start_members(params: &Self::MembersSetupKey) -> Self::Intermediate;
 	/// Introduce a new `Member` into the intermediate value used to build a new `Members` value.
 	fn push_member(
 		intermediate: &mut Self::Intermediate,
