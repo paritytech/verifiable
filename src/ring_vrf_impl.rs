@@ -223,24 +223,13 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
-		let max_len: u32 = kzg()
-			.max_keyset_size()
-			.try_into()
-			.expect("Impossibly large a KZG, qed");
-		let mut prover_idx = u32::MAX;
-		let mut pks = Vec::with_capacity(members.size_hint().0);
-		for (idx, m) in members.enumerate() {
-			if idx as u32 >= max_len {
-				return Err(());
-			}
-			if &m == member {
-				prover_idx = idx as u32
-			}
-			pks.push(m.0 .0);
-		}
+		let pks: Vec<_> = members.map(|m| m.0.0).collect();
+		let member_idx = pks.iter()
+			.position(|&m| m == member.0.0)
+			.ok_or(())?;
+		let member_idx = member_idx as u32;
 		let prover_key = kzg().prover_key(pks);
-
-		Ok((prover_idx, prover_key.into()))
+		Ok((member_idx, prover_key.into()))
 	}
 
 	#[cfg(not(feature = "std"))]
