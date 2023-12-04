@@ -18,7 +18,7 @@ use super::*;
 type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
 
-const DOMAIN_SIZE: usize = 1 << 9;
+const DOMAIN_SIZE: usize = 1 << 16;
 
 const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
@@ -29,13 +29,13 @@ const THIN_SIGNATURE_SIZE: usize = 65;
 const RING_SIGNATURE_SIZE: usize = 788;
 
 #[cfg(feature = "std")]
-static KZG_BYTES: &[u8] = include_bytes!("test2e9.kzg");
+static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
 
 // Some naive benchmarking for deserialization of KZG with domain size 2^16
 // - compressed + checked = ~16 s
 // - uncompressed + checked = ~12 s
 // - compressed + unchecked = ~5 s
-// - uncompressed + unchecked = 211 ms  <<<<<<<<<<<<<<<<<<<
+// - uncompressed + unchecked = 211 ms
 #[cfg(feature = "std")]
 fn kzg() -> &'static KZG {
 	use std::sync::OnceLock;
@@ -395,7 +395,14 @@ mod tests {
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
 		let kzg = kzg();
+
+		let start = Instant::now();
 		let ring_builder_key = RingBuilderKey::from_srs(&kzg.pcs_params, kzg.domain_size as usize);
+		println!(
+			"* Ring Builder Key: {} ms",
+			(Instant::now() - start).as_millis()
+		);
+
 		let lis = ring_builder_key.lis_in_g1;
 		let get_one = |i: usize| Ok(ArkScale(lis[i]));
 		let get_many = |start: usize, len: usize| {
@@ -406,10 +413,22 @@ mod tests {
 			Ok(res)
 		};
 
+		let start = Instant::now();
 		let mut inter = BandersnatchVrfVerifiable::start_members(kzg.pcs_params.raw_vk(), get_many);
+		println!(
+			"* Start members: {} ms",
+			(Instant::now() - start).as_millis()
+		);
+
+		let start = Instant::now();
 		members.iter().for_each(|member| {
 			BandersnatchVrfVerifiable::push_member(&mut inter, member.clone(), get_one).unwrap();
 		});
+		println!(
+			"* Push {} members: {} ms",
+			members.len(),
+			(Instant::now() - start).as_millis()
+		);
 
 		let start = Instant::now();
 		let members = BandersnatchVrfVerifiable::finish_members(inter);
