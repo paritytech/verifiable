@@ -1,15 +1,15 @@
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use bandersnatch_vrfs::{
-	IntoVrfInput, Message, PublicKey, ring::ProverKey, RingVerifier, SecretKey, Transcript,
-	VrfInput,
-};
-#[cfg(feature = "std")]
-use bandersnatch_vrfs::{ring::KZG, RingProver};
 use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
 use bandersnatch_vrfs::bls12_381;
 use bandersnatch_vrfs::bls12_381::Bls12_381;
 use bandersnatch_vrfs::ring::VerifierKey;
+use bandersnatch_vrfs::{
+	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
+	VrfInput,
+};
+#[cfg(feature = "std")]
+use bandersnatch_vrfs::{ring::KZG, RingProver};
 use fflonk::pcs::kzg::params::RawKzgVerifierKey;
 use ring::ring::{Ring, SrsSegment};
 
@@ -41,17 +41,14 @@ fn kzg() -> &'static KZG {
 	use std::sync::OnceLock;
 	static CELL: OnceLock<KZG> = OnceLock::new();
 	CELL.get_or_init(|| {
-		<KZG as CanonicalDeserialize>::deserialize_compressed_unchecked(
-			KZG_BYTES,
-		)
-		.unwrap()
+		<KZG as CanonicalDeserialize>::deserialize_compressed_unchecked(KZG_BYTES).unwrap()
 	})
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
-pub struct MembersSet{
+pub struct MembersSet {
 	ring: Ring<bandersnatch_vrfs::bls12_381::Fr, Bls12_381, BandersnatchConfig>,
-    kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
+	kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
 }
 
 ark_scale::impl_scale_via_ark!(MembersSet);
@@ -120,14 +117,21 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Signature = [u8; THIN_SIGNATURE_SIZE];
 	type StaticChunk = ArkScale<bls12_381::G1Affine>;
 
-	fn start_members(vk: Self::MembersSetupKey, lookup: impl Fn(usize, usize) -> Result<Vec<Self::StaticChunk>, ()>) -> MembersSet {
+	fn start_members(
+		vk: Self::MembersSetupKey,
+		lookup: impl Fn(usize, usize) -> Result<Vec<Self::StaticChunk>, ()>,
+	) -> MembersSet {
 		let piop_params = bandersnatch_vrfs::ring::make_piop_params(DOMAIN_SIZE);
 		let offset = piop_params.keyset_part_size;
 		let len = DOMAIN_SIZE - offset;
 		let srs_segment = lookup(offset, len).unwrap();
 		let srs_segment: Vec<bls12_381::G1Affine> = srs_segment.iter().map(|p| p.0).collect();
 		let srs_segment = SrsSegment::<Bls12_381>::shift(&srs_segment, offset);
-		let ring = Ring::<bls12_381::Fr, Bls12_381, BandersnatchConfig>::empty(&piop_params, &srs_segment, vk.g1.into());
+		let ring = Ring::<bls12_381::Fr, Bls12_381, BandersnatchConfig>::empty(
+			&piop_params,
+			&srs_segment,
+			vk.g1.into(),
+		);
 		MembersSet {
 			ring,
 			kzg_raw_vk: vk,
@@ -143,7 +147,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let srs_point = lookup(curr_size)?;
 		let srs_point = [srs_point.0];
 		let srs_segment = SrsSegment::<Bls12_381>::shift(&srs_point, curr_size);
-		intermediate.ring.append(&[who.0.0], &srs_segment);
+		intermediate.ring.append(&[who.0 .0], &srs_segment);
 		Ok(())
 	}
 
@@ -299,9 +303,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use fflonk::pcs::PcsParams;
 	use ring::ring::RingBuilderKey;
-	use super::*;
 
 	#[test]
 	#[ignore = "Build a test KZG"]
@@ -331,13 +335,13 @@ mod tests {
 		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&chalie_sec);
 
-
 		let kzg = kzg();
 		let ring_builder_key = RingBuilderKey::from_srs(&kzg.pcs_params, kzg.domain_size as usize);
 		let lis = ring_builder_key.lis_in_g1;
 		let get_one = |i: usize| Ok(ArkScale(lis[i]));
 		let get_many = |start: usize, len: usize| {
-            let res = lis[start..start + len].iter()
+			let res = lis[start..start + len]
+				.iter()
 				.map(|p| ArkScale(*p))
 				.collect();
 			Ok(res)
@@ -396,7 +400,8 @@ mod tests {
 		let lis = ring_builder_key.lis_in_g1;
 		let get_one = |i: usize| Ok(ArkScale(lis[i]));
 		let get_many = |start: usize, len: usize| {
-			let res = lis[start..start + len].iter()
+			let res = lis[start..start + len]
+				.iter()
 				.map(|p| ArkScale(*p))
 				.collect();
 			Ok(res)
