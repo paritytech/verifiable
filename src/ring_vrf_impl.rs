@@ -310,9 +310,8 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 
 #[cfg(test)]
 mod tests {
+	use bandersnatch_vrfs::ring::StaticVerifierKey;
 	use super::*;
-	use fflonk::pcs::PcsParams;
-	use ring::ring::RingBuilderKey;
 
 	#[test]
 	fn start_push_finish() {
@@ -324,18 +323,19 @@ mod tests {
 		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&chalie_sec);
 
-		let kzg = kzg();
-		let ring_builder_key = RingBuilderKey::from_srs(&kzg.pcs_params, kzg.domain_size as usize);
-		let lis = ring_builder_key.lis_in_g1;
-		let get_one = |i: usize| Ok(ArkScale(lis[i]));
+		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
+			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
+		).unwrap();
+
+		let get_one = |i: usize| Ok(ArkScale(vk.lag_g1[i]));
 		let get_many = |start: usize, len: usize| {
-			let res = lis[start..start + len]
+			let res = vk.lag_g1[start..start + len]
 				.iter()
 				.map(|p| ArkScale(*p))
 				.collect();
 			Ok(res)
 		};
-		let mut inter = BandersnatchVrfVerifiable::start_members(kzg.pcs_params.raw_vk(), get_many);
+		let mut inter = BandersnatchVrfVerifiable::start_members(vk.kzg_vk, get_many);
 		BandersnatchVrfVerifiable::push_member(&mut inter, alice.clone(), get_one).unwrap();
 		BandersnatchVrfVerifiable::push_member(&mut inter, bob.clone(), get_one).unwrap();
 		BandersnatchVrfVerifiable::push_member(&mut inter, charlie.clone(), get_one).unwrap();
@@ -384,19 +384,13 @@ mod tests {
 		println!("* Create: {} ms", (Instant::now() - start).as_millis());
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
-		let kzg = kzg();
+		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
+			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
+		).unwrap();
 
-		let start = Instant::now();
-		let ring_builder_key = RingBuilderKey::from_srs(&kzg.pcs_params, kzg.domain_size as usize);
-		println!(
-			"* Ring Builder Key: {} ms",
-			(Instant::now() - start).as_millis()
-		);
-
-		let lis = ring_builder_key.lis_in_g1;
-		let get_one = |i: usize| Ok(ArkScale(lis[i]));
+		let get_one = |i: usize| Ok(ArkScale(vk.lag_g1[i]));
 		let get_many = |start: usize, len: usize| {
-			let res = lis[start..start + len]
+			let res = vk.lag_g1[start..start + len]
 				.iter()
 				.map(|p| ArkScale(*p))
 				.collect();
@@ -404,7 +398,7 @@ mod tests {
 		};
 
 		let start = Instant::now();
-		let mut inter = BandersnatchVrfVerifiable::start_members(kzg.pcs_params.raw_vk(), get_many);
+		let mut inter = BandersnatchVrfVerifiable::start_members(vk.kzg_vk, get_many);
 		println!(
 			"* Start members: {} ms",
 			(Instant::now() - start).as_millis()
