@@ -10,6 +10,7 @@ use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 /// in the "root" (just a Vec).
 pub struct Trivial;
 impl GenerateVerifiable for Trivial {
+	type MembersSetupKey = ();
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Member = [u8; 32];
@@ -19,9 +20,13 @@ impl GenerateVerifiable for Trivial {
 	type Signature = [u8; 32];
 	type StaticChunk = ();
 
-	fn start_members() -> Self::Intermediate {
+	fn start_members(
+		_: Self::MembersSetupKey,
+		_lookup: impl Fn(usize, usize) -> Result<Vec<Self::StaticChunk>, ()>,
+	) -> Self::Intermediate {
 		BoundedVec::new()
 	}
+
 	fn push_member(
 		inter: &mut Self::Intermediate,
 		who: Self::Member,
@@ -84,6 +89,7 @@ const SIG_CON: &[u8] = b"verifiable";
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
 pub struct Simple;
 impl GenerateVerifiable for Simple {
+	type MembersSetupKey = ();
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Member = [u8; 32];
@@ -93,9 +99,13 @@ impl GenerateVerifiable for Simple {
 	type Signature = [u8; 32];
 	type StaticChunk = ();
 
-	fn start_members() -> Self::Intermediate {
+	fn start_members(
+		_: Self::MembersSetupKey,
+		_lookup: impl Fn(usize, usize) -> Result<Vec<Self::StaticChunk>, ()>,
+	) -> Self::Intermediate {
 		BoundedVec::new()
 	}
+
 	fn push_member(
 		inter: &mut Self::Intermediate,
 		who: Self::Member,
@@ -178,7 +188,7 @@ mod tests {
 		let alice = <Simple as GenerateVerifiable>::member_from_secret(&alice_sec);
 		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
-		let mut inter = <Simple as GenerateVerifiable>::start_members();
+		let mut inter = <Simple as GenerateVerifiable>::start_members((), |_, _| Ok(Vec::new()));
 		<Simple as GenerateVerifiable>::push_member(&mut inter, alice.clone(), |_| Ok(())).unwrap();
 		<Simple as GenerateVerifiable>::push_member(&mut inter, bob.clone(), |_| Ok(())).unwrap();
 		let members = <Simple as GenerateVerifiable>::finish_members(inter);

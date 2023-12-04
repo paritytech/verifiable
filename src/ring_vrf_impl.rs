@@ -174,7 +174,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
 		let ring_verifier =
 			bandersnatch_vrfs::ring::make_ring_verifier(members.0.clone(), DOMAIN_SIZE);
-		// let ring_verifier = kzg().init_ring_verifier(members.0.clone());
 
 		let vrf_input = Message {
 			domain: VRF_INPUT_DOMAIN,

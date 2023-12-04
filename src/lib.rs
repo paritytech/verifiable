@@ -9,7 +9,7 @@ use core::fmt::Debug;
 use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
-// pub mod demo_impls;
+pub mod demo_impls;
 pub mod ring_vrf_impl;
 
 // Fixed types:
@@ -40,6 +40,7 @@ pub type Entropy = [u8; 32];
 /// A convenience `Receipt` type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
 pub trait GenerateVerifiable {
+	/// Setup data which may be required by the implementation.
 	type MembersSetupKey;
 
 	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
