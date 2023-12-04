@@ -3,7 +3,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
 use bandersnatch_vrfs::bls12_381;
 use bandersnatch_vrfs::bls12_381::Bls12_381;
-use bandersnatch_vrfs::ring::VerifierKey;
+use bandersnatch_vrfs::ring::{StaticProverKey, VerifierKey};
 use bandersnatch_vrfs::{
 	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
 	VrfInput,
@@ -18,7 +18,20 @@ use super::*;
 type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
 
+#[cfg(not(test))]
 const DOMAIN_SIZE: usize = 1 << 16;
+#[cfg(test)]
+const DOMAIN_SIZE: usize = 1 << 9;
+
+#[cfg(not(test))]
+pub(crate) const OFFCHAIN_KEY_PATH: &str = "zcash-16.pk";
+#[cfg(test)]
+pub(crate) const OFFCHAIN_KEY_PATH: &str = "zcash-9.pk";
+
+#[cfg(not(test))]
+pub(crate) const ONCHAIN_KEY_PATH: &str = "zcash-16.vk";
+#[cfg(test)]
+pub(crate) const ONCHAIN_KEY_PATH: &str = "zcash-9.pk";
 
 const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
@@ -29,25 +42,20 @@ const THIN_SIGNATURE_SIZE: usize = 65;
 const RING_SIGNATURE_SIZE: usize = 788;
 
 #[cfg(feature = "std")]
-static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
-
-// Some naive benchmarking for deserialization of KZG with domain size 2^16
-// - compressed + checked = ~16 s
-// - uncompressed + checked = ~12 s
-// - compressed + unchecked = ~5 s
-// - uncompressed + unchecked = 211 ms
-#[cfg(feature = "std")]
 fn kzg() -> &'static KZG {
 	use std::sync::OnceLock;
 	static CELL: OnceLock<KZG> = OnceLock::new();
 	CELL.get_or_init(|| {
-		<KZG as CanonicalDeserialize>::deserialize_compressed_unchecked(KZG_BYTES).unwrap()
+		let pk = StaticProverKey::deserialize_uncompressed_unchecked(
+			std::fs::read(OFFCHAIN_KEY_PATH).unwrap().as_slice()
+		).unwrap();
+		KZG::zcash_kzg_setup(DOMAIN_SIZE, pk)
 	})
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MembersSet {
-	ring: Ring<bandersnatch_vrfs::bls12_381::Fr, Bls12_381, BandersnatchConfig>,
+	ring: Ring<bls12_381::Fr, Bls12_381, BandersnatchConfig>,
 	kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
 }
 
@@ -305,24 +313,6 @@ mod tests {
 	use super::*;
 	use fflonk::pcs::PcsParams;
 	use ring::ring::RingBuilderKey;
-
-	#[test]
-	#[ignore = "Build a test KZG"]
-	fn build_static_kzg() {
-		println!("Building testing KZG");
-
-		let path = std::path::Path::new("src/test2e9.kzg");
-		use std::fs::OpenOptions;
-		let mut oo = OpenOptions::new();
-		oo.read(true).write(true).create(true).truncate(true);
-		if let Ok(mut file) = oo.open(path) {
-			let kzg = KZG::insecure_kzg_setup(DOMAIN_SIZE as u32, &mut rand_core::OsRng);
-
-			kzg.serialize_compressed(&mut file).unwrap_or_else(|why| {
-				panic!("couldn't write {}: {}", path.display(), why);
-			});
-		}
-	}
 
 	#[test]
 	fn start_push_finish() {
