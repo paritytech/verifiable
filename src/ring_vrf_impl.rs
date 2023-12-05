@@ -33,7 +33,7 @@ mod domain_params {
 	pub const DOMAIN_SIZE: usize = 1 << 16;
 }
 
-use domain_params::*;
+pub use domain_params::*;
 
 const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
