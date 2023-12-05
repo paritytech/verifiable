@@ -111,9 +111,9 @@ impl core::cmp::PartialEq for MembersCommitment {
 
 impl core::cmp::Eq for MembersCommitment {}
 
-pub struct BandersnatchVrfVerifiable;
+pub struct RingVrfVerifiable;
 
-impl GenerateVerifiable for BandersnatchVrfVerifiable {
+impl GenerateVerifiable for RingVrfVerifiable {
 	type MembersSetupKey = RawKzgVerifierKey;
 	type Members = MembersCommitment;
 	type Intermediate = MembersSet;
@@ -316,13 +316,13 @@ mod tests {
 
 	#[test]
 	fn start_push_finish() {
-		let alice_sec = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
-		let bob_sec = BandersnatchVrfVerifiable::new_secret([1u8; 32]);
-		let chalie_sec = BandersnatchVrfVerifiable::new_secret([2u8; 32]);
+		let alice_sec = RingVrfVerifiable::new_secret([0u8; 32]);
+		let bob_sec = RingVrfVerifiable::new_secret([1u8; 32]);
+		let chalie_sec = RingVrfVerifiable::new_secret([2u8; 32]);
 
-		let alice = BandersnatchVrfVerifiable::member_from_secret(&alice_sec);
-		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
-		let charlie = BandersnatchVrfVerifiable::member_from_secret(&chalie_sec);
+		let alice = RingVrfVerifiable::member_from_secret(&alice_sec);
+		let bob = RingVrfVerifiable::member_from_secret(&bob_sec);
+		let charlie = RingVrfVerifiable::member_from_secret(&chalie_sec);
 
 		let kzg = kzg();
 		let ring_builder_key = RingBuilderKey::from_srs(&kzg.pcs_params, kzg.domain_size as usize);
@@ -335,20 +335,20 @@ mod tests {
 				.collect();
 			Ok(res)
 		};
-		let mut inter = BandersnatchVrfVerifiable::start_members(kzg.pcs_params.raw_vk(), get_many);
-		BandersnatchVrfVerifiable::push_member(&mut inter, alice.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter, bob.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter, charlie.clone(), get_one).unwrap();
-		let _members = BandersnatchVrfVerifiable::finish_members(inter);
+		let mut inter = RingVrfVerifiable::start_members(kzg.pcs_params.raw_vk(), get_many);
+		RingVrfVerifiable::push_member(&mut inter, alice.clone(), get_one).unwrap();
+		RingVrfVerifiable::push_member(&mut inter, bob.clone(), get_one).unwrap();
+		RingVrfVerifiable::push_member(&mut inter, charlie.clone(), get_one).unwrap();
+		let _members = RingVrfVerifiable::finish_members(inter);
 	}
 
 	#[test]
 	fn test_plain_signature() {
 		let msg = b"asd";
-		let secret = BandersnatchVrfVerifiable::new_secret([0; 32]);
-		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let signature = BandersnatchVrfVerifiable::sign(&secret, msg).unwrap();
-		let res = BandersnatchVrfVerifiable::verify_signature(&signature, msg, &public);
+		let secret = RingVrfVerifiable::new_secret([0; 32]);
+		let public = RingVrfVerifiable::member_from_secret(&secret);
+		let signature = RingVrfVerifiable::sign(&secret, msg).unwrap();
+		let res = RingVrfVerifiable::verify_signature(&signature, msg, &public);
 		assert!(res);
 	}
 
@@ -365,8 +365,8 @@ mod tests {
 
 		let members: Vec<_> = (0..10)
 			.map(|i| {
-				let secret = BandersnatchVrfVerifiable::new_secret([i as u8; 32]);
-				let member = BandersnatchVrfVerifiable::member_from_secret(&secret);
+				let secret = RingVrfVerifiable::new_secret([i as u8; 32]);
+				let member = RingVrfVerifiable::member_from_secret(&secret);
 				let raw = member.encode();
 				println!("0x{}", hex::encode(raw));
 				member
@@ -375,16 +375,15 @@ mod tests {
 		let member = members[3].clone();
 
 		let start = Instant::now();
-		let commitment =
-			BandersnatchVrfVerifiable::open(&member, members.clone().into_iter()).unwrap();
+		let commitment = RingVrfVerifiable::open(&member, members.clone().into_iter()).unwrap();
 		println!("* Open: {} ms", (Instant::now() - start).as_millis());
 		println!("  Commitment size: {} bytes", commitment.encode().len()); // ~49 MB
 		assert_eq!(commitment.encoded_size(), MEMBERS_COMMITMENT_MAX_SIZE);
 
-		let secret = BandersnatchVrfVerifiable::new_secret([commitment.0 as u8; 32]);
+		let secret = RingVrfVerifiable::new_secret([commitment.0 as u8; 32]);
 		let start = Instant::now();
 		let (proof, alias) =
-			BandersnatchVrfVerifiable::create(commitment, &secret, context, message).unwrap();
+			RingVrfVerifiable::create(commitment, &secret, context, message).unwrap();
 		println!("* Create: {} ms", (Instant::now() - start).as_millis());
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
@@ -406,7 +405,7 @@ mod tests {
 		};
 
 		let start = Instant::now();
-		let mut inter = BandersnatchVrfVerifiable::start_members(kzg.pcs_params.raw_vk(), get_many);
+		let mut inter = RingVrfVerifiable::start_members(kzg.pcs_params.raw_vk(), get_many);
 		println!(
 			"* Start members: {} ms",
 			(Instant::now() - start).as_millis()
@@ -416,7 +415,7 @@ mod tests {
 
 		let start = Instant::now();
 		members.iter().for_each(|member| {
-			BandersnatchVrfVerifiable::push_member(&mut inter, member.clone(), get_one).unwrap();
+			RingVrfVerifiable::push_member(&mut inter, member.clone(), get_one).unwrap();
 		});
 		println!(
 			"* Push {} members: {} ms",
@@ -425,15 +424,14 @@ mod tests {
 		);
 
 		let start = Instant::now();
-		let members = BandersnatchVrfVerifiable::finish_members(inter);
+		let members = RingVrfVerifiable::finish_members(inter);
 		println!(
 			"* Finish members: {} ms",
 			(Instant::now() - start).as_millis()
 		);
 
 		let start = Instant::now();
-		let alias2 =
-			BandersnatchVrfVerifiable::validate(&proof, &members, context, message).unwrap();
+		let alias2 = RingVrfVerifiable::validate(&proof, &members, context, message).unwrap();
 		println!("* Validate {} ms", (Instant::now() - start).as_millis());
 		assert_eq!(alias, alias2);
 	}
