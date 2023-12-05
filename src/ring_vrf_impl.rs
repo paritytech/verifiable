@@ -17,7 +17,11 @@ pub use ring;
 
 use super::*;
 
-const DOMAIN_SIZE: usize = 1 << 9;
+// Depends on `DOMAIN_SIZE`
+#[cfg(feature = "std")]
+static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
+
+const DOMAIN_SIZE: usize = 1 << 16;
 
 const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
@@ -37,9 +41,6 @@ type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
 type Ring = ring::ring::Ring<bls12_381::Fr, bls12_381::Bls12_381, BandersnatchConfig>;
 type RawKzgVerifierKey = fflonk::pcs::kzg::params::RawKzgVerifierKey<bls12_381::Bls12_381>;
 type SrsSegment<'a> = ring::ring::SrsSegment<'a, bls12_381::Bls12_381>;
-
-#[cfg(feature = "std")]
-static KZG_BYTES: &[u8] = include_bytes!("test2e9.kzg");
 
 // Some naive benchmarking for deserialization of KZG with domain size 2^16
 // - compressed + checked = ~16 s
@@ -296,17 +297,19 @@ mod tests {
 	use fflonk::pcs::PcsParams;
 	use ring::ring::RingBuilderKey;
 
+	const TESTING_SEED: [u8; 32] = [0; 32];
+
 	#[test]
-	#[ignore = "Build a test KZG"]
+	// #[ignore = "Build a test KZG"]
 	fn build_static_kzg() {
 		println!("Building testing KZG");
 
-		let path = std::path::Path::new("src/test2e9.kzg");
+		let path = std::path::Path::new("src/test2e16.kzg");
 		use std::fs::OpenOptions;
 		let mut oo = OpenOptions::new();
 		oo.read(true).write(true).create(true).truncate(true);
 		if let Ok(mut file) = oo.open(path) {
-			let kzg = KZG::insecure_kzg_setup(DOMAIN_SIZE as u32, &mut rand_core::OsRng);
+			let kzg = KZG::testing_kzg_setup(TESTING_SEED, DOMAIN_SIZE as u32);
 
 			kzg.serialize_compressed(&mut file).unwrap_or_else(|why| {
 				panic!("couldn't write {}: {}", path.display(), why);
@@ -380,6 +383,7 @@ mod tests {
 		println!("  Commitment size: {} bytes", commitment.encode().len()); // ~49 MB
 		assert_eq!(commitment.encoded_size(), MEMBERS_COMMITMENT_MAX_SIZE);
 
+		// In this test we've computed the secrets using the index as the seed content (see above)
 		let secret = RingVrfVerifiable::new_secret([commitment.0 as u8; 32]);
 		let start = Instant::now();
 		let (proof, alias) =
