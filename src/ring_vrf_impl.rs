@@ -21,16 +21,16 @@ use super::*;
 mod domain_params {
 	#[cfg(feature = "std")]
 	pub(crate) static KZG_BYTES: &[u8] = include_bytes!("test2e9.kzg");
-	pub(crate) const DOMAIN_SIZE: usize = 1 << 9;
 	pub(crate) const MEMBERS_COMMITMENT_MAX_SIZE: usize = 387375;
+	pub const DOMAIN_SIZE: usize = 1 << 9;
 }
 
 #[cfg(not(feature = "small-domain"))]
 mod domain_params {
 	#[cfg(feature = "std")]
 	pub(crate) static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
-	pub(crate) const DOMAIN_SIZE: usize = 1 << 16;
 	pub(crate) const MEMBERS_COMMITMENT_MAX_SIZE: usize = 49350447;
+	pub const DOMAIN_SIZE: usize = 1 << 16;
 }
 
 use domain_params::*;
