@@ -392,13 +392,6 @@ mod tests {
 			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
 		).unwrap();
 		let get_one = |i: usize| Ok(ArkScale(vk.lag_g1[i]));
-		// let get_many = |start: usize, len: usize| {
-		// 	let res = vk.lag_g1[start..start + len]
-		// 		.iter()
-		// 		.map(|p| ArkScale(*p))
-		// 		.collect();
-		// 	Ok(res)
-		// };
 
 		let start = Instant::now();
 		let mut inter = BandersnatchVrfVerifiable::start_members();
