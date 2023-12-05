@@ -3,14 +3,13 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
 use bandersnatch_vrfs::bls12_381;
 use bandersnatch_vrfs::bls12_381::Bls12_381;
-use bandersnatch_vrfs::ring::{StaticProverKey, VerifierKey};
+use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, StaticProverKey, VerifierKey};
 use bandersnatch_vrfs::{
 	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
 	VrfInput,
 };
 #[cfg(feature = "std")]
 use bandersnatch_vrfs::{ring::KZG, RingProver};
-use fflonk::pcs::kzg::params::RawKzgVerifierKey;
 use ring::ring::{Ring, SrsSegment};
 
 use super::*;
@@ -24,14 +23,19 @@ const DOMAIN_SIZE: usize = 1 << 16;
 const DOMAIN_SIZE: usize = 1 << 9;
 
 #[cfg(not(test))]
-pub(crate) const OFFCHAIN_KEY_PATH: &str = "zcash-16.pk";
+const OFFCHAIN_KEY_PATH: &str = "zcash-16.pk";
 #[cfg(test)]
-pub(crate) const OFFCHAIN_KEY_PATH: &str = "zcash-9.pk";
+const OFFCHAIN_KEY_PATH: &str = "zcash-9.pk";
 
 #[cfg(not(test))]
-pub(crate) const ONCHAIN_KEY_PATH: &str = "zcash-16.vk";
+const ONCHAIN_KEY_PATH: &str = "zcash-16.vk";
 #[cfg(test)]
-pub(crate) const ONCHAIN_KEY_PATH: &str = "zcash-9.pk";
+const ONCHAIN_KEY_PATH: &str = "zcash-9.vk";
+
+#[cfg(not(test))]
+const EMPTY_RING: RingCommitment = bandersnatch_vrfs::zcash_consts::EMPTY_RING_ZCASH_16;
+#[cfg(test)]
+const EMPTY_RING: RingCommitment = bandersnatch_vrfs::zcash_consts::EMPTY_RING_ZCASH_9;
 
 const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
@@ -49,14 +53,14 @@ fn kzg() -> &'static KZG {
 		let pk = StaticProverKey::deserialize_uncompressed_unchecked(
 			std::fs::read(OFFCHAIN_KEY_PATH).unwrap().as_slice()
 		).unwrap();
-		KZG::zcash_kzg_setup(DOMAIN_SIZE, pk)
+		KZG::kzg_setup(DOMAIN_SIZE, pk)
 	})
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MembersSet {
 	ring: Ring<bls12_381::Fr, Bls12_381, BandersnatchConfig>,
-	kzg_raw_vk: RawKzgVerifierKey<Bls12_381>,
+	kzg_raw_vk: KzgVk,
 }
 
 ark_scale::impl_scale_via_ark!(MembersSet);
@@ -114,26 +118,15 @@ impl core::cmp::Eq for MembersCommitment {}
 
 pub struct BandersnatchVrfVerifiable;
 
-impl GenerateVerifiable for BandersnatchVrfVerifiable {
-	type MembersSetupKey = RawKzgVerifierKey<Bls12_381>;
-	type Members = MembersCommitment;
-	type Intermediate = MembersSet;
-	type Member = ArkScale<PublicKey>;
-	type Secret = SecretKey;
-	type Commitment = (u32, ArkScale<ProverKey>);
-	type Proof = [u8; RING_SIGNATURE_SIZE];
-	type Signature = [u8; THIN_SIGNATURE_SIZE];
-	type StaticChunk = ArkScale<bls12_381::G1Affine>;
-
-	fn start_members(
-		vk: Self::MembersSetupKey,
-		lookup: impl Fn(usize, usize) -> Result<Vec<Self::StaticChunk>, ()>,
+impl BandersnatchVrfVerifiable {
+	pub fn start_members_from_params(
+		vk: KzgVk,
+		lookup: impl Fn(usize, usize) -> Result<Vec<bls12_381::G1Affine>, ()>,
 	) -> MembersSet {
 		let piop_params = bandersnatch_vrfs::ring::make_piop_params(DOMAIN_SIZE);
 		let offset = piop_params.keyset_part_size;
 		let len = DOMAIN_SIZE - offset;
 		let srs_segment = lookup(offset, len).unwrap();
-		let srs_segment: Vec<bls12_381::G1Affine> = srs_segment.iter().map(|p| p.0).collect();
 		let srs_segment = SrsSegment::<Bls12_381>::shift(&srs_segment, offset);
 		let ring = Ring::<bls12_381::Fr, Bls12_381, BandersnatchConfig>::empty(
 			&piop_params,
@@ -143,6 +136,24 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		MembersSet {
 			ring,
 			kzg_raw_vk: vk,
+		}
+	}
+}
+
+impl GenerateVerifiable for BandersnatchVrfVerifiable {
+	type Members = MembersCommitment;
+	type Intermediate = MembersSet;
+	type Member = ArkScale<PublicKey>;
+	type Secret = SecretKey;
+	type Commitment = (u32, ArkScale<ProverKey>);
+	type Proof = [u8; RING_SIGNATURE_SIZE];
+	type Signature = [u8; THIN_SIGNATURE_SIZE];
+	type StaticChunk = ArkScale<bls12_381::G1Affine>;
+
+	fn start_members() -> Self::Intermediate {
+		MembersSet {
+			ring: EMPTY_RING,
+			kzg_raw_vk: bandersnatch_vrfs::zcash_consts::ZCASH_KZG_VK,
 		}
 	}
 
@@ -315,20 +326,24 @@ mod tests {
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
 			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
 		).unwrap();
-
 		let get_one = |i: usize| Ok(ArkScale(vk.lag_g1[i]));
-		let get_many = |start: usize, len: usize| {
-			let res = vk.lag_g1[start..start + len]
-				.iter()
-				.map(|p| ArkScale(*p))
-				.collect();
-			Ok(res)
-		};
-		let mut inter = BandersnatchVrfVerifiable::start_members(vk.kzg_vk, get_many);
-		BandersnatchVrfVerifiable::push_member(&mut inter, alice.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter, bob.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter, charlie.clone(), get_one).unwrap();
-		let _members = BandersnatchVrfVerifiable::finish_members(inter);
+		let get_many = |start: usize, len: usize| Ok(vk.lag_g1[start..start + len].to_vec());
+
+		let mut inter1 = BandersnatchVrfVerifiable::start_members();
+		let mut inter2 = BandersnatchVrfVerifiable::start_members_from_params(vk.kzg_vk, get_many);
+		assert_eq!(inter1, inter2);
+
+		BandersnatchVrfVerifiable::push_member(&mut inter1, alice.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter1, bob.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter1, charlie.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter2, alice.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter2, bob.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter2, charlie.clone(), get_one).unwrap();
+		assert_eq!(inter1, inter2);
+
+		let members1 = BandersnatchVrfVerifiable::finish_members(inter1);
+		let members2 = BandersnatchVrfVerifiable::finish_members(inter2);
+		assert_eq!(members1, members2);
 	}
 
 	#[test]
@@ -376,18 +391,17 @@ mod tests {
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
 			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
 		).unwrap();
-
 		let get_one = |i: usize| Ok(ArkScale(vk.lag_g1[i]));
-		let get_many = |start: usize, len: usize| {
-			let res = vk.lag_g1[start..start + len]
-				.iter()
-				.map(|p| ArkScale(*p))
-				.collect();
-			Ok(res)
-		};
+		// let get_many = |start: usize, len: usize| {
+		// 	let res = vk.lag_g1[start..start + len]
+		// 		.iter()
+		// 		.map(|p| ArkScale(*p))
+		// 		.collect();
+		// 	Ok(res)
+		// };
 
 		let start = Instant::now();
-		let mut inter = BandersnatchVrfVerifiable::start_members(vk.kzg_vk, get_many);
+		let mut inter = BandersnatchVrfVerifiable::start_members();
 		println!(
 			"* Start members: {} ms",
 			(Instant::now() - start).as_millis()
