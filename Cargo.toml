@@ -19,7 +19,6 @@ ring = { git = "https://github.com/w3f/ring-proof", default-features = false }
 
 [dev-dependencies]
 rand_core = "0.6"
-hex = "0.4.3"
 
 [features]
 default = [ "std" ]
@@ -34,3 +33,6 @@ std = [
   "fflonk/std",
   "ring/std",
 ]
+# Suggested domain for agile experimentation (2^9)
+# Parameters for bigger domains will be hardcoded and not computed.
+small-domain = []

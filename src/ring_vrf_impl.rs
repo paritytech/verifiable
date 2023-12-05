@@ -17,11 +17,23 @@ pub use ring;
 
 use super::*;
 
-// Depends on `DOMAIN_SIZE`
-#[cfg(feature = "std")]
-static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
+#[cfg(feature = "small-domain")]
+mod domain_params {
+	#[cfg(feature = "std")]
+	pub(crate) static KZG_BYTES: &[u8] = include_bytes!("test2e9.kzg");
+	pub(crate) const DOMAIN_SIZE: usize = 1 << 9;
+	pub(crate) const MEMBERS_COMMITMENT_MAX_SIZE: usize = 387375;
+}
 
-const DOMAIN_SIZE: usize = 1 << 16;
+#[cfg(not(feature = "small-domain"))]
+mod domain_params {
+	#[cfg(feature = "std")]
+	pub(crate) static KZG_BYTES: &[u8] = include_bytes!("test2e16.kzg");
+	pub(crate) const DOMAIN_SIZE: usize = 1 << 16;
+	pub(crate) const MEMBERS_COMMITMENT_MAX_SIZE: usize = 49350447;
+}
+
+use domain_params::*;
 
 const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
@@ -31,9 +43,6 @@ const VRF_OUTPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
 const THIN_SIGNATURE_SIZE: usize = 65;
 const RING_SIGNATURE_SIZE: usize = 788;
 const MEMBERS_SET_MAX_SIZE: usize = 433;
-
-// WARN: this depends on the domain size
-const MEMBERS_COMMITMENT_MAX_SIZE: usize = 387375;
 
 type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
@@ -300,11 +309,15 @@ mod tests {
 	const TESTING_SEED: [u8; 32] = [0; 32];
 
 	#[test]
-	// #[ignore = "Build a test KZG"]
+	#[ignore = "Build a test KZG"]
 	fn build_static_kzg() {
 		println!("Building testing KZG");
 
+		#[cfg(feature = "small-domain")]
+		let path = std::path::Path::new("src/test2e9.kzg");
+		#[cfg(not(feature = "small-domain"))]
 		let path = std::path::Path::new("src/test2e16.kzg");
+
 		use std::fs::OpenOptions;
 		let mut oo = OpenOptions::new();
 		oo.read(true).write(true).create(true).truncate(true);
@@ -370,8 +383,6 @@ mod tests {
 			.map(|i| {
 				let secret = RingVrfVerifiable::new_secret([i as u8; 32]);
 				let member = RingVrfVerifiable::member_from_secret(&secret);
-				let raw = member.encode();
-				println!("0x{}", hex::encode(raw));
 				member
 			})
 			.collect();
