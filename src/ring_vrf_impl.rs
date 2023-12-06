@@ -65,10 +65,10 @@ pub struct MembersSet {
 
 ark_scale::impl_scale_via_ark!(MembersSet);
 
-const MEMBERS_SET_MAX_SIZE: usize = 48 * 1024; //TODO
+const MEMBERS_SET_SIZE: usize = 4 * 48 + 2 * 96 + 32 + 2 * 4;  // 4 bls G1 + 2 bls G2 + jubjub + 2 usize
 
 impl scale_info::TypeInfo for MembersSet {
-	type Identity = [u8; MEMBERS_SET_MAX_SIZE];
+	type Identity = [u8; MEMBERS_SET_SIZE];
 
 	fn type_info() -> Type {
 		Self::Identity::type_info()
@@ -77,7 +77,7 @@ impl scale_info::TypeInfo for MembersSet {
 
 impl MaxEncodedLen for MembersSet {
 	fn max_encoded_len() -> usize {
-		<[u8; MEMBERS_SET_MAX_SIZE]>::max_encoded_len()
+		MEMBERS_SET_SIZE
 	}
 }
 
@@ -86,10 +86,10 @@ pub struct MembersCommitment(VerifierKey);
 
 ark_scale::impl_scale_via_ark!(MembersCommitment);
 
-const MEMBERS_COMMITMENT_MAX_SIZE: usize = 512;
+const MEMBERS_COMMITMENT_SIZE: usize = 4 * 48 + 2 * 96; // 4 bls G1 + 2 bls G2
 
 impl scale_info::TypeInfo for MembersCommitment {
-	type Identity = [u8; MEMBERS_COMMITMENT_MAX_SIZE];
+	type Identity = [u8; MEMBERS_COMMITMENT_SIZE];
 
 	fn type_info() -> Type {
 		Self::Identity::type_info()
@@ -98,7 +98,7 @@ impl scale_info::TypeInfo for MembersCommitment {
 
 impl MaxEncodedLen for MembersCommitment {
 	fn max_encoded_len() -> usize {
-		MEMBERS_COMMITMENT_MAX_SIZE
+		MEMBERS_COMMITMENT_SIZE
 	}
 }
 
