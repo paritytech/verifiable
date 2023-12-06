@@ -14,7 +14,6 @@ schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_ba
 ark-serialize = { version = "0.4", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.11", default-features = false }
 bandersnatch_vrfs = { git = "https://github.com/w3f/ring-vrf.git", branch = "real-srs", default-features = false }
-ring = { git = "https://github.com/w3f/ring-proof.git", default-features = false }
 
 [dev-dependencies]
 rand_core = "0.6"
@@ -29,5 +28,4 @@ std = [
   "ark-serialize/std",
   "ark-scale/std",
   "bandersnatch_vrfs/std",
-  "ring/std",
 ]

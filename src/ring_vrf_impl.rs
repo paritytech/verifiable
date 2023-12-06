@@ -9,11 +9,8 @@ use bandersnatch_vrfs::{
 };
 #[cfg(feature = "std")]
 use bandersnatch_vrfs::{ring::KZG, ring::StaticProverKey, RingProver};
-use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
 use bandersnatch_vrfs::bls12_381;
-use bandersnatch_vrfs::bls12_381::Bls12_381;
 use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, VerifierKey};
-use ring::ring::Ring;
 
 use super::*;
 
@@ -62,7 +59,7 @@ fn kzg() -> &'static KZG {
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MembersSet {
-	ring: Ring<bls12_381::Fr, Bls12_381, BandersnatchConfig>,
+	ring: RingCommitment,
 	kzg_raw_vk: KzgVk,
 }
 
@@ -127,11 +124,7 @@ impl BandersnatchVrfVerifiable {
 		srs: impl Fn(Range<usize>) -> Result<Vec<bls12_381::G1Affine>, ()>,
 	) -> MembersSet {
 		let piop_params = bandersnatch_vrfs::ring::make_piop_params(DOMAIN_SIZE);
-		let ring = Ring::<bls12_381::Fr, Bls12_381, BandersnatchConfig>::empty(
-			&piop_params,
-			srs,
-			vk.g1.into(),
-		);
+		let ring = RingCommitment::empty(&piop_params, srs,vk.g1.into());
 		MembersSet {
 			ring,
 			kzg_raw_vk: vk,
