@@ -1,16 +1,19 @@
+use alloc::vec;
+use core::ops::Range;
+
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
-use bandersnatch_vrfs::bls12_381;
-use bandersnatch_vrfs::bls12_381::Bls12_381;
-use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, StaticProverKey, VerifierKey};
 use bandersnatch_vrfs::{
-	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
+	IntoVrfInput, Message, PublicKey, ring::ProverKey, RingVerifier, SecretKey, Transcript,
 	VrfInput,
 };
 #[cfg(feature = "std")]
-use bandersnatch_vrfs::{ring::KZG, RingProver};
-use ring::ring::{Ring, SrsSegment};
+use bandersnatch_vrfs::{ring::KZG, ring::StaticProverKey, RingProver};
+use bandersnatch_vrfs::bandersnatch::BandersnatchConfig;
+use bandersnatch_vrfs::bls12_381;
+use bandersnatch_vrfs::bls12_381::Bls12_381;
+use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, VerifierKey};
+use ring::ring::Ring;
 
 use super::*;
 
@@ -121,16 +124,12 @@ pub struct BandersnatchVrfVerifiable;
 impl BandersnatchVrfVerifiable {
 	pub fn start_members_from_params(
 		vk: KzgVk,
-		lookup: impl Fn(usize, usize) -> Result<Vec<bls12_381::G1Affine>, ()>,
+		srs: impl Fn(Range<usize>) -> Result<Vec<bls12_381::G1Affine>, ()>,
 	) -> MembersSet {
 		let piop_params = bandersnatch_vrfs::ring::make_piop_params(DOMAIN_SIZE);
-		let offset = piop_params.keyset_part_size;
-		let len = DOMAIN_SIZE - offset;
-		let srs_segment = lookup(offset, len).unwrap();
-		let srs_segment = SrsSegment::<Bls12_381>::shift(&srs_segment, offset);
 		let ring = Ring::<bls12_381::Fr, Bls12_381, BandersnatchConfig>::empty(
 			&piop_params,
-			&srs_segment,
+			srs,
 			vk.g1.into(),
 		);
 		MembersSet {
@@ -162,11 +161,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		who: Self::Member,
 		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
 	) -> Result<(), ()> {
-		let curr_size = intermediate.ring.curr_keys;
-		let srs_point = lookup(curr_size)?;
-		let srs_point = [srs_point.0];
-		let srs_segment = SrsSegment::<Bls12_381>::shift(&srs_point, curr_size);
-		intermediate.ring.append(&[who.0 .0], &srs_segment);
+		intermediate.ring.append(&[who.0 .0], |range| Ok(vec![lookup(range.start)?.0]));
 		Ok(())
 	}
 
@@ -311,33 +306,34 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 #[cfg(test)]
 mod tests {
 	use bandersnatch_vrfs::ring::StaticVerifierKey;
+
 	use super::*;
 
 	#[test]
 	fn start_push_finish() {
 		let alice_sec = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let bob_sec = BandersnatchVrfVerifiable::new_secret([1u8; 32]);
-		let chalie_sec = BandersnatchVrfVerifiable::new_secret([2u8; 32]);
+		let charlie_sec = BandersnatchVrfVerifiable::new_secret([2u8; 32]);
 
 		let alice = BandersnatchVrfVerifiable::member_from_secret(&alice_sec);
 		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
-		let charlie = BandersnatchVrfVerifiable::member_from_secret(&chalie_sec);
+		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
 
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
 			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
 		).unwrap();
-		let get_one = |i: usize| Ok(ArkScale(vk.lag_g1[i]));
-		let get_many = |start: usize, len: usize| Ok(vk.lag_g1[start..start + len].to_vec());
+		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
+		let get_many = |range: Range<usize>| Ok(vk.lag_g1[range].to_vec());
 
 		let mut inter1 = BandersnatchVrfVerifiable::start_members();
 		let mut inter2 = BandersnatchVrfVerifiable::start_members_from_params(vk.kzg_vk, get_many);
 		assert_eq!(inter1, inter2);
 
 		BandersnatchVrfVerifiable::push_member(&mut inter1, alice.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter1, bob.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter1, charlie.clone(), get_one).unwrap();
 		BandersnatchVrfVerifiable::push_member(&mut inter2, alice.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter1, bob.clone(), get_one).unwrap();
 		BandersnatchVrfVerifiable::push_member(&mut inter2, bob.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter1, charlie.clone(), get_one).unwrap();
 		BandersnatchVrfVerifiable::push_member(&mut inter2, charlie.clone(), get_one).unwrap();
 		assert_eq!(inter1, inter2);
 
@@ -391,7 +387,7 @@ mod tests {
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
 			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
 		).unwrap();
-		let get_one = |i: usize| Ok(ArkScale(vk.lag_g1[i]));
+		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
 
 		let start = Instant::now();
 		let mut inter = BandersnatchVrfVerifiable::start_members();
