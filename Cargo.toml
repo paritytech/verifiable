@@ -29,3 +29,6 @@ std = [
   "ark-scale/std",
   "bandersnatch_vrfs/std",
 ]
+# Small (2^9) zcash params (defaults to 2^16)
+# Mostly useful for testing
+small-ring = []
