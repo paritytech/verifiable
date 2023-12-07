@@ -14,6 +14,8 @@ use bandersnatch_vrfs::{ring::StaticProverKey, ring::KZG, RingProver};
 
 use super::*;
 
+pub use bandersnatch_vrfs;
+
 type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
 
@@ -26,11 +28,6 @@ pub const DOMAIN_SIZE: usize = 1 << 9;
 const OFFCHAIN_KEY_PATH: &str = "zcash-16.pk";
 #[cfg(test)]
 const OFFCHAIN_KEY_PATH: &str = "zcash-9.pk";
-
-#[cfg(not(test))]
-const ONCHAIN_KEY_PATH: &str = "zcash-16.vk";
-#[cfg(test)]
-const ONCHAIN_KEY_PATH: &str = "zcash-9.vk";
 
 #[cfg(not(test))]
 const EMPTY_RING: RingCommitment = bandersnatch_vrfs::zcash_consts::EMPTY_RING_ZCASH_16;
@@ -60,8 +57,8 @@ fn kzg() -> &'static KZG {
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MembersSet {
-	ring: RingCommitment,
-	kzg_raw_vk: KzgVk,
+	pub ring: RingCommitment,
+	pub kzg_raw_vk: KzgVk,
 }
 
 ark_scale::impl_scale_via_ark!(MembersSet);
@@ -302,6 +299,11 @@ mod tests {
 	use bandersnatch_vrfs::ring::StaticVerifierKey;
 
 	use super::*;
+
+	#[cfg(not(test))]
+	const ONCHAIN_KEY_PATH: &str = "zcash-16.vk";
+	#[cfg(test)]
+	const ONCHAIN_KEY_PATH: &str = "zcash-9.vk";
 
 	#[test]
 	fn start_push_finish() {
