@@ -6,8 +6,8 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use bandersnatch_vrfs::bls12_381;
 use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, VerifierKey};
 use bandersnatch_vrfs::{
-	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
-	VrfInput,
+	ring::ProverKey, zcash_consts, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey,
+	Transcript, VrfInput,
 };
 #[cfg(feature = "std")]
 use bandersnatch_vrfs::{ring::StaticProverKey, ring::KZG, RingProver};
@@ -19,20 +19,23 @@ pub use bandersnatch_vrfs;
 type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
 
-#[cfg(not(test))]
-pub const DOMAIN_SIZE: usize = 1 << 16;
-#[cfg(test)]
-pub const DOMAIN_SIZE: usize = 1 << 9;
+#[cfg(feature = "small-ring")]
+mod domain_params {
+	use super::*;
+	pub const DOMAIN_SIZE: usize = 1 << 9;
+	pub(crate) const EMPTY_RING: RingCommitment = zcash_consts::EMPTY_RING_ZCASH_9;
+	pub(crate) const OFFCHAIN_PK: &[u8] = include_bytes!("ring-data/zcash-9.pk");
+}
 
-#[cfg(not(test))]
-const OFFCHAIN_KEY_PATH: &str = "zcash-16.pk";
-#[cfg(test)]
-const OFFCHAIN_KEY_PATH: &str = "zcash-9.pk";
+#[cfg(not(feature = "small-ring"))]
+mod domain_params {
+	use super::*;
+	pub const DOMAIN_SIZE: usize = 1 << 16;
+	pub(crate) const EMPTY_RING: RingCommitment = zcash_consts::EMPTY_RING_ZCASH_16;
+	pub(crate) const OFFCHAIN_PK: &[u8] = include_bytes!("ring-data/zcash-16.pk");
+}
 
-#[cfg(not(test))]
-const EMPTY_RING: RingCommitment = bandersnatch_vrfs::zcash_consts::EMPTY_RING_ZCASH_16;
-#[cfg(test)]
-const EMPTY_RING: RingCommitment = bandersnatch_vrfs::zcash_consts::EMPTY_RING_ZCASH_9;
+pub use domain_params::*;
 
 const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
 
@@ -47,10 +50,7 @@ fn kzg() -> &'static KZG {
 	use std::sync::OnceLock;
 	static CELL: OnceLock<KZG> = OnceLock::new();
 	CELL.get_or_init(|| {
-		let pk = StaticProverKey::deserialize_uncompressed_unchecked(
-			std::fs::read(OFFCHAIN_KEY_PATH).unwrap().as_slice(),
-		)
-		.unwrap();
+		let pk = StaticProverKey::deserialize_uncompressed_unchecked(OFFCHAIN_PK).unwrap();
 		KZG::kzg_setup(DOMAIN_SIZE, pk)
 	})
 }
@@ -300,10 +300,10 @@ mod tests {
 
 	use super::*;
 
-	#[cfg(not(test))]
-	const ONCHAIN_KEY_PATH: &str = "zcash-16.vk";
-	#[cfg(test)]
-	const ONCHAIN_KEY_PATH: &str = "zcash-9.vk";
+	#[cfg(feature = "small-ring")]
+	const ONCHAIN_VK: &[u8] = include_bytes!("ring-data/zcash-9.vk");
+	#[cfg(not(feature = "small-ring"))]
+	const ONCHAIN_VK: &[u8] = include_bytes!("ring-data/zcash-16.vk");
 
 	#[test]
 	fn start_push_finish() {
@@ -315,10 +315,7 @@ mod tests {
 		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
 
-		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
-			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice(),
-		)
-		.unwrap();
+		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
 		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
 		let get_many = |range: Range<usize>| Ok(vk.lag_g1[range].to_vec());
 
@@ -381,10 +378,7 @@ mod tests {
 		println!("* Create: {} ms", (Instant::now() - start).as_millis());
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
-		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
-			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice(),
-		)
-		.unwrap();
+		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
 		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
 
 		let start = Instant::now();
