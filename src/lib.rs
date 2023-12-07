@@ -70,7 +70,7 @@ pub trait GenerateVerifiable {
 	/// with respect to the corresponding `Member`.
 	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
-	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
+	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
