@@ -1,5 +1,6 @@
 use super::*;
 use bounded_collections::{BoundedVec, ConstU32};
+use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
 // Example impls:
 
@@ -21,7 +22,12 @@ impl GenerateVerifiable for Trivial {
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
 	}
-	fn push_member(inter: &mut Self::Intermediate, who: Self::Member, _lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>) -> Result<(), ()> {
+
+	fn push_member(
+		inter: &mut Self::Intermediate,
+		who: Self::Member,
+		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+	) -> Result<(), ()> {
 		inter.try_push(who).map_err(|_| ())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
@@ -91,7 +97,12 @@ impl GenerateVerifiable for Simple {
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
 	}
-	fn push_member(inter: &mut Self::Intermediate, who: Self::Member, _lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>) -> Result<(), ()> {
+
+	fn push_member(
+		inter: &mut Self::Intermediate,
+		who: Self::Member,
+		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+	) -> Result<(), ()> {
 		inter.try_push(who).map_err(|_| ())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
@@ -170,28 +181,38 @@ mod tests {
 		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
 		let mut inter = <Simple as GenerateVerifiable>::start_members();
-		<Simple as GenerateVerifiable>::push_member(&mut inter, alice.clone()).unwrap();
-		<Simple as GenerateVerifiable>::push_member(&mut inter, bob.clone()).unwrap();
+		<Simple as GenerateVerifiable>::push_member(&mut inter, alice.clone(), |_| Ok(())).unwrap();
+		<Simple as GenerateVerifiable>::push_member(&mut inter, bob.clone(), |_| Ok(())).unwrap();
 		let members = <Simple as GenerateVerifiable>::finish_members(inter);
 
 		type SimpleReceipt = Receipt<Simple>;
 		let context = &b"My context"[..];
 		let message = b"Hello world";
 
-		let r =
-			SimpleReceipt::create(&alice_sec, members.iter(), context, message.to_vec()).unwrap();
+		let r = SimpleReceipt::create(
+			&alice_sec,
+			members.iter().cloned(),
+			context,
+			message.to_vec(),
+		)
+		.unwrap();
 		let (alias, msg) = r.verify(&members, &context).unwrap();
 		assert_eq!(&message[..], &msg[..]);
 		assert_eq!(alias, alice);
 
-		let r = SimpleReceipt::create(&bob_sec, members.iter(), context, message.to_vec()).unwrap();
+		let r = SimpleReceipt::create(&bob_sec, members.iter().cloned(), context, message.to_vec())
+			.unwrap();
 		let (alias, msg) = r.verify(&members, &context).unwrap();
 		assert_eq!(&message[..], &msg[..]);
 		assert_eq!(alias, bob);
 
-		assert!(
-			SimpleReceipt::create(&charlie_sec, members.iter(), context, message.to_vec()).is_err()
-		);
+		assert!(SimpleReceipt::create(
+			&charlie_sec,
+			members.iter().cloned(),
+			context,
+			message.to_vec()
+		)
+		.is_err());
 	}
 
 	const SIG_CON: &[u8] = b"test";
