@@ -3,14 +3,14 @@ use core::ops::Range;
 
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use bandersnatch_vrfs::bls12_381;
+use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, VerifierKey};
 use bandersnatch_vrfs::{
-	IntoVrfInput, Message, PublicKey, ring::ProverKey, RingVerifier, SecretKey, Transcript,
+	ring::ProverKey, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey, Transcript,
 	VrfInput,
 };
 #[cfg(feature = "std")]
-use bandersnatch_vrfs::{ring::KZG, ring::StaticProverKey, RingProver};
-use bandersnatch_vrfs::bls12_381;
-use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, VerifierKey};
+use bandersnatch_vrfs::{ring::StaticProverKey, ring::KZG, RingProver};
 
 use super::*;
 
@@ -18,9 +18,9 @@ type ThinVrfSignature = bandersnatch_vrfs::ThinVrfSignature<0>;
 type RingVrfSignature = bandersnatch_vrfs::RingVrfSignature<1>;
 
 #[cfg(not(test))]
-const DOMAIN_SIZE: usize = 1 << 16;
+pub const DOMAIN_SIZE: usize = 1 << 16;
 #[cfg(test)]
-const DOMAIN_SIZE: usize = 1 << 9;
+pub const DOMAIN_SIZE: usize = 1 << 9;
 
 #[cfg(not(test))]
 const OFFCHAIN_KEY_PATH: &str = "zcash-16.pk";
@@ -51,8 +51,9 @@ fn kzg() -> &'static KZG {
 	static CELL: OnceLock<KZG> = OnceLock::new();
 	CELL.get_or_init(|| {
 		let pk = StaticProverKey::deserialize_uncompressed_unchecked(
-			std::fs::read(OFFCHAIN_KEY_PATH).unwrap().as_slice()
-		).unwrap();
+			std::fs::read(OFFCHAIN_KEY_PATH).unwrap().as_slice(),
+		)
+		.unwrap();
 		KZG::kzg_setup(DOMAIN_SIZE, pk)
 	})
 }
@@ -65,7 +66,7 @@ pub struct MembersSet {
 
 ark_scale::impl_scale_via_ark!(MembersSet);
 
-const MEMBERS_SET_SIZE: usize = 4 * 48 + 2 * 96 + 32 + 2 * 4;  // 4 bls G1 + 2 bls G2 + jubjub + 2 usize
+const MEMBERS_SET_SIZE: usize = 4 * 48 + 2 * 96 + 32 + 2 * 4; // 4 bls G1 + 2 bls G2 + jubjub + 2 usize
 
 impl scale_info::TypeInfo for MembersSet {
 	type Identity = [u8; MEMBERS_SET_SIZE];
@@ -124,7 +125,7 @@ impl BandersnatchVrfVerifiable {
 		srs: impl Fn(Range<usize>) -> Result<Vec<bls12_381::G1Affine>, ()>,
 	) -> MembersSet {
 		let piop_params = bandersnatch_vrfs::ring::make_piop_params(DOMAIN_SIZE);
-		let ring = RingCommitment::empty(&piop_params, srs,vk.g1.into());
+		let ring = RingCommitment::empty(&piop_params, srs, vk.g1.into());
 		MembersSet {
 			ring,
 			kzg_raw_vk: vk,
@@ -154,7 +155,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		who: Self::Member,
 		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
 	) -> Result<(), ()> {
-		intermediate.ring.append(&[who.0 .0], |range| Ok(vec![lookup(range.start)?.0]));
+		intermediate
+			.ring
+			.append(&[who.0 .0], |range| Ok(vec![lookup(range.start)?.0]));
 		Ok(())
 	}
 
@@ -230,10 +233,8 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
-		let pks: Vec<_> = members.map(|m| m.0.0).collect();
-		let member_idx = pks.iter()
-			.position(|&m| m == member.0.0)
-			.ok_or(())?;
+		let pks: Vec<_> = members.map(|m| m.0 .0).collect();
+		let member_idx = pks.iter().position(|&m| m == member.0 .0).ok_or(())?;
 		let member_idx = member_idx as u32;
 		let prover_key = kzg().prover_key(pks);
 		Ok((member_idx, prover_key.into()))
@@ -313,8 +314,9 @@ mod tests {
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
 
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
-			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
-		).unwrap();
+			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice(),
+		)
+		.unwrap();
 		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
 		let get_many = |range: Range<usize>| Ok(vk.lag_g1[range].to_vec());
 
@@ -378,8 +380,9 @@ mod tests {
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(
-			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice()
-		).unwrap();
+			std::fs::read(ONCHAIN_KEY_PATH).unwrap().as_slice(),
+		)
+		.unwrap();
 		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
 
 		let start = Instant::now();
