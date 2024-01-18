@@ -24,6 +24,7 @@ mod domain_params {
 	use super::*;
 	pub const DOMAIN_SIZE: usize = 1 << 9;
 	pub(crate) const EMPTY_RING: RingCommitment = zcash_consts::EMPTY_RING_ZCASH_9;
+	#[cfg(feature = "std")]
 	pub(crate) const OFFCHAIN_PK: &[u8] = include_bytes!("ring-data/zcash-9.pk");
 }
 
@@ -32,6 +33,7 @@ mod domain_params {
 	use super::*;
 	pub const DOMAIN_SIZE: usize = 1 << 16;
 	pub(crate) const EMPTY_RING: RingCommitment = zcash_consts::EMPTY_RING_ZCASH_16;
+	#[cfg(feature = "std")]
 	pub(crate) const OFFCHAIN_PK: &[u8] = include_bytes!("ring-data/zcash-16.pk");
 }
 
