@@ -12,6 +12,7 @@ pub struct Trivial;
 impl GenerateVerifiable for Trivial {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
+	type InternalMember = [u8; 32];
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
@@ -77,6 +78,14 @@ impl GenerateVerifiable for Trivial {
 			Err(())
 		}
 	}
+
+	fn external_member(value: &Self::InternalMember) -> Self::Member {
+		value.clone()
+	}
+
+	fn internal_member(value: &Self::Member) -> Self::InternalMember {
+		value.clone()
+	}
 }
 
 const SIG_CON: &[u8] = b"verifiable";
@@ -87,6 +96,7 @@ pub struct Simple;
 impl GenerateVerifiable for Simple {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
+	type InternalMember = [u8; 32];
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
@@ -165,6 +175,14 @@ impl GenerateVerifiable for Simple {
 				.map(|_| proof.1.clone())
 				.map_err(|_| ())
 		})
+	}
+
+	fn external_member(value: &Self::InternalMember) -> Self::Member {
+		value.clone()
+	}
+
+	fn internal_member(value: &Self::Member) -> Self::InternalMember {
+		value.clone()
 	}
 }
 

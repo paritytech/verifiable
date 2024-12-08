@@ -3,11 +3,11 @@ use core::ops::Range;
 
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use bandersnatch_vrfs::bls12_381;
 use bandersnatch_vrfs::ring::{KzgVk, RingCommitment, VerifierKey};
+use bandersnatch_vrfs::{bls12_381, deserialize_publickey, PUBLIC_KEY_LENGTH};
 use bandersnatch_vrfs::{
-	ring::ProverKey, zcash_consts, IntoVrfInput, Message, PublicKey, RingVerifier, SecretKey,
-	Transcript, VrfInput,
+	ring::ProverKey, zcash_consts, IntoVrfInput, Message, PublicKey as PublicKeyInternal,
+	RingVerifier, SecretKey, Transcript, VrfInput,
 };
 #[cfg(feature = "std")]
 use bandersnatch_vrfs::{ring::StaticProverKey, ring::KZG, RingProver};
@@ -24,6 +24,7 @@ mod domain_params {
 	use super::*;
 	pub const DOMAIN_SIZE: usize = 1 << 9;
 	pub(crate) const EMPTY_RING: RingCommitment = zcash_consts::EMPTY_RING_ZCASH_9;
+	#[cfg(feature = "std")]
 	pub(crate) const OFFCHAIN_PK: &[u8] = include_bytes!("ring-data/zcash-9.pk");
 }
 
@@ -32,6 +33,7 @@ mod domain_params {
 	use super::*;
 	pub const DOMAIN_SIZE: usize = 1 << 16;
 	pub(crate) const EMPTY_RING: RingCommitment = zcash_consts::EMPTY_RING_ZCASH_16;
+	#[cfg(feature = "std")]
 	pub(crate) const OFFCHAIN_PK: &[u8] = include_bytes!("ring-data/zcash-16.pk");
 }
 
@@ -130,10 +132,14 @@ impl BandersnatchVrfVerifiable {
 	}
 }
 
+#[derive(Clone, Eq, PartialEq, Debug, Encode, Decode, TypeInfo, MaxEncodedLen)]
+pub struct EncodedPublicKey(pub [u8; PUBLIC_KEY_LENGTH]);
+
 impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Members = MembersCommitment;
 	type Intermediate = MembersSet;
-	type Member = ArkScale<PublicKey>;
+	type Member = EncodedPublicKey;
+	type InternalMember = PublicKeyInternal;
 	type Secret = SecretKey;
 	type Commitment = (u32, ArkScale<ProverKey>);
 	type Proof = [u8; RING_SIGNATURE_SIZE];
@@ -152,9 +158,10 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		who: Self::Member,
 		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
 	) -> Result<(), ()> {
+		let who: Self::InternalMember = Self::internal_member(&who);
 		intermediate
 			.ring
-			.append(&[who.0 .0], |range| Ok(vec![lookup(range.start)?.0]));
+			.append(&[who.0], |range| Ok(vec![lookup(range.start)?.0]));
 		Ok(())
 	}
 
@@ -168,7 +175,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	}
 
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
-		secret.to_public().into()
+		Self::external_member(&secret.to_public())
 	}
 
 	fn validate(
@@ -219,8 +226,8 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			ThinVrfSignature::deserialize_compressed(signature.as_slice()).unwrap();
 		let mut transcript = Transcript::new_labeled(THIN_SIGNATURE_CONTEXT);
 		transcript.append_slice(message);
+		let member: Self::InternalMember = Self::internal_member(member);
 		member
-			.0
 			.verify_thin_vrf(transcript, core::iter::empty::<VrfInput>(), &signature)
 			.is_ok()
 	}
@@ -230,8 +237,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
-		let pks: Vec<_> = members.map(|m| m.0 .0).collect();
-		let member_idx = pks.iter().position(|&m| m == member.0 .0).ok_or(())?;
+		let pks: Vec<_> = members.map(|m| Self::internal_member(&m).0).collect();
+		let member: Self::InternalMember = Self::internal_member(member);
+		let member_idx = pks.iter().position(|&m| m == member.0).ok_or(())?;
 		let member_idx = member_idx as u32;
 		let prover_key = kzg().prover_key(pks);
 		Ok((member_idx, prover_key.into()))
@@ -291,6 +299,18 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		_message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
 		panic!("Not implemented")
+	}
+
+	fn external_member(value: &Self::InternalMember) -> Self::Member {
+		let mut bytes = [0u8; PUBLIC_KEY_LENGTH];
+		value.using_encoded(|encoded| {
+			bytes.copy_from_slice(encoded);
+		});
+		EncodedPublicKey(bytes)
+	}
+
+	fn internal_member(value: &Self::Member) -> Self::InternalMember {
+		deserialize_publickey(&value.0[..]).expect("must be valid")
 	}
 }
 

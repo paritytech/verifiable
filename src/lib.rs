@@ -49,10 +49,14 @@ pub trait GenerateVerifiable {
 	///
 	/// This is envisioned to be stored on-chain.
 	type Intermediate: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
-	/// Value identifying a single member. Corresponds to the Public Key.
+	/// Encoded value identifying a single member. Corresponds to the user representation of a Public Key.
 	///
-	/// This is stored on-chain and also expected to be passed on-chain as a parameter.
+	/// This is expected to be passed on-chain as an encoded version of `InternalMember`.
 	type Member: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
+	/// Value identifying a single member. Corresponds to the internal representation of a Public Key.
+	///
+	/// This is stored on-chain.
+	type InternalMember: Clone + Eq + PartialEq + FullCodec + Debug + MaxEncodedLen;
 	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
 	///
 	/// This is not envisioned to be used on-chain.
@@ -163,6 +167,12 @@ pub trait GenerateVerifiable {
 	) -> bool {
 		false
 	}
+
+	/// Convert a member value from internal to external representation.
+	fn external_member(value: &Self::InternalMember) -> Self::Member;
+
+	/// Convert a member value from external to internal representation.
+	fn internal_member(value: &Self::Member) -> Self::InternalMember;
 }
 
 // This is just a convenience struct to help manage some of the witness data. No need to look at it.
