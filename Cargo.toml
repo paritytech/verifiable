@@ -13,7 +13,7 @@ scale-info = { version = "2.7.0", default-features = false, features = ["derive"
 schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
 ark-serialize = { version = "0.4", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.12", default-features = false }
-bandersnatch_vrfs = { git = "https://github.com/davxy/ring-vrf.git", rev = "48b642a", default-features = false }
+bandersnatch_vrfs = { git = "https://github.com/davxy/ring-vrf.git", rev = "6fbd102", default-features = false }
 
 [dev-dependencies]
 rand_core = "0.6"
