@@ -79,6 +79,10 @@ impl GenerateVerifiable for Trivial {
 		}
 	}
 
+	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
+		Ok(secret.clone())
+	}
+
 	fn external_member(value: &Self::InternalMember) -> Self::Member {
 		value.clone()
 	}
@@ -175,6 +179,10 @@ impl GenerateVerifiable for Simple {
 				.map(|_| proof.1.clone())
 				.map_err(|_| ())
 		})
+	}
+
+	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
+		Ok(Self::member_from_secret(&secret))
 	}
 
 	fn external_member(value: &Self::InternalMember) -> Self::Member {
