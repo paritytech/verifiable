@@ -301,6 +301,19 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		panic!("Not implemented")
 	}
 
+	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
+		let vrf_input = Message {
+			domain: VRF_INPUT_DOMAIN,
+			message: context,
+		}
+		.into_vrf_input();
+
+		let ios = [secret.vrf_inout(vrf_input)];
+
+		let alias: Alias = ios[0].vrf_output_bytes(VRF_OUTPUT_DOMAIN);
+		Ok(alias)
+	}
+
 	fn external_member(value: &Self::InternalMember) -> Self::Member {
 		let mut bytes = [0u8; PUBLIC_KEY_LENGTH];
 		value.using_encoded(|encoded| {
@@ -430,5 +443,10 @@ mod tests {
 			BandersnatchVrfVerifiable::validate(&proof, &members, context, message).unwrap();
 		println!("* Validate {} ms", (Instant::now() - start).as_millis());
 		assert_eq!(alias, alias2);
+
+		let start = Instant::now();
+		let alias3 = BandersnatchVrfVerifiable::alias_in_context(&secret, context).unwrap();
+		println!("* Alias: {} ms", (Instant::now() - start).as_millis());
+		assert_eq!(alias, alias3);
 	}
 }

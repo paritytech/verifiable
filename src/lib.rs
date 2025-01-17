@@ -150,6 +150,9 @@ pub trait GenerateVerifiable {
 		}
 	}
 
+	/// Generate the alias a `secret` would have in a given `context`.
+	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()>;
+
 	/// Like `is_valid`, but `alias` is returned, not provided.
 	fn validate(
 		_proof: &Self::Proof,
