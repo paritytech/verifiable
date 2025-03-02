@@ -209,7 +209,8 @@ impl GenerateVerifiable for Simple {
 		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
 		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
 
-		let sig = ("no-ctxt", message).using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
+		let sig = ("no-ctxt", message)
+			.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
 
 		Ok(sig)
 	}
@@ -220,9 +221,7 @@ impl GenerateVerifiable for Simple {
 	) -> bool {
 		let p = PublicKey::from_bytes(&member[..]).unwrap();
 		let s = schnorrkel::Signature::from_bytes(&signature[..]).unwrap();
-		("no-ctxt", message).using_encoded(|b| {
-			p.verify_simple(SIG_CON, b, &s).is_ok()
-		})
+		("no-ctxt", message).using_encoded(|b| p.verify_simple(SIG_CON, b, &s).is_ok())
 	}
 }
 
@@ -325,7 +324,8 @@ mod tests {
 
 		let another_secrect = [1; 32];
 		let another_member = <Simple as GenerateVerifiable>::member_from_secret(&another_secrect);
-		let another_signature = <Simple as GenerateVerifiable>::sign(&another_secrect, b"Hello world").unwrap();
+		let another_signature =
+			<Simple as GenerateVerifiable>::sign(&another_secrect, b"Hello world").unwrap();
 
 		assert!(<Simple as GenerateVerifiable>::verify_signature(
 			&signature,
