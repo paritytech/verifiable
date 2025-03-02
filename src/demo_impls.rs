@@ -90,6 +90,18 @@ impl GenerateVerifiable for Trivial {
 	fn internal_member(value: &Self::Member) -> Self::InternalMember {
 		value.clone()
 	}
+
+	fn sign(secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
+		Ok(secret.clone())
+	}
+
+	fn verify_signature(
+		signature: &Self::Signature,
+		_message: &[u8],
+		member: &Self::Member,
+	) -> bool {
+		signature == member
+	}
 }
 
 const SIG_CON: &[u8] = b"verifiable";
@@ -105,7 +117,7 @@ impl GenerateVerifiable for Simple {
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
-	type Signature = [u8; 32];
+	type Signature = [u8; 64];
 	type StaticChunk = ();
 
 	fn start_members() -> Self::Intermediate {
@@ -192,6 +204,24 @@ impl GenerateVerifiable for Simple {
 	fn internal_member(value: &Self::Member) -> Self::InternalMember {
 		value.clone()
 	}
+
+	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
+		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
+		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
+
+		Ok(message.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes()))
+	}
+	fn verify_signature(
+		signature: &Self::Signature,
+		message: &[u8],
+		member: &Self::Member,
+	) -> bool {
+		let p = PublicKey::from_bytes(&member[..]).unwrap();
+		let s = schnorrkel::Signature::from_bytes(&signature[..]).unwrap();
+		message.using_encoded(|b| {
+			p.verify_simple(SIG_CON, b, &s).is_ok()
+		})
+	}
 }
 
 #[cfg(test)]
@@ -271,5 +301,49 @@ mod tests {
 			p.verify_simple(SIG_CON, &message[..], &s).is_ok()
 		};
 		assert!(!ok);
+	}
+
+	#[test]
+	fn trivial_signature_works() {
+		let secret = [0; 32];
+		let member = <Trivial as GenerateVerifiable>::member_from_secret(&secret);
+		let signature = <Trivial as GenerateVerifiable>::sign(&secret, b"Hello world").unwrap();
+		assert!(<Trivial as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"Hello world",
+			&member
+		));
+	}
+
+	#[test]
+	fn simple_signature_works() {
+		let secret = [0; 32];
+		let member = <Simple as GenerateVerifiable>::member_from_secret(&secret);
+		let signature = <Simple as GenerateVerifiable>::sign(&secret, b"Hello world").unwrap();
+
+		let another_secrect = [1; 32];
+		let another_member = <Simple as GenerateVerifiable>::member_from_secret(&another_secrect);
+		let another_signature = <Simple as GenerateVerifiable>::sign(&another_secrect, b"Hello world").unwrap();
+
+		assert!(<Simple as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"Hello world",
+			&member
+		));
+		assert!(!<Simple as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"Hello world",
+			&another_member
+		));
+		assert!(!<Simple as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"No hello",
+			&member
+		));
+		assert!(!<Simple as GenerateVerifiable>::verify_signature(
+			&another_signature,
+			b"Hello world",
+			&member
+		));
 	}
 }
