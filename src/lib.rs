@@ -6,7 +6,7 @@ extern crate core;
 use alloc::vec::Vec;
 
 use core::fmt::Debug;
-use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
+use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
 pub mod demo_impls;
@@ -179,7 +179,7 @@ pub trait GenerateVerifiable {
 }
 
 // This is just a convenience struct to help manage some of the witness data. No need to look at it.
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
+#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, DecodeWithMemTracking)]
 pub struct Receipt<Gen: GenerateVerifiable> {
 	proof: Gen::Proof,
 	alias: Alias,

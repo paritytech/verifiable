@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 derive-where = "1.2"
 bounded-collections = { version = "0.1.8", default-features = false }
-parity-scale-codec = { version = "3.6.1", default-features = false, features = ["derive","max-encoded-len"] }
+parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.7.0", default-features = false, features = ["derive"] }
 schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
 ark-serialize = { version = "0.4", default-features = false, features = ["derive"] }
