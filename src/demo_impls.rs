@@ -209,7 +209,9 @@ impl GenerateVerifiable for Simple {
 		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
 		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
 
-		Ok(message.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes()))
+		let sig = ("no-ctxt", message).using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
+
+		Ok(sig)
 	}
 	fn verify_signature(
 		signature: &Self::Signature,
@@ -218,7 +220,7 @@ impl GenerateVerifiable for Simple {
 	) -> bool {
 		let p = PublicKey::from_bytes(&member[..]).unwrap();
 		let s = schnorrkel::Signature::from_bytes(&signature[..]).unwrap();
-		message.using_encoded(|b| {
+		("no-ctxt", message).using_encoded(|b| {
 			p.verify_simple(SIG_CON, b, &s).is_ok()
 		})
 	}
