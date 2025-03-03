@@ -95,7 +95,9 @@ impl GenerateVerifiable for Trivial {
 const SIG_CON: &[u8] = b"verifiable";
 
 /// Example impl of `Verifiable` which uses Schnorrkel. This doesn't anonymise anything.
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
+#[derive(
+	Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking,
+)]
 pub struct Simple;
 impl GenerateVerifiable for Simple {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;

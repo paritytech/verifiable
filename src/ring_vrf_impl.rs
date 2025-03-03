@@ -132,7 +132,9 @@ impl BandersnatchVrfVerifiable {
 	}
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Encode, Decode, TypeInfo, MaxEncodedLen)]
+#[derive(
+	Clone, Eq, PartialEq, Debug, Encode, Decode, TypeInfo, MaxEncodedLen, DecodeWithMemTracking,
+)]
 pub struct EncodedPublicKey(pub [u8; PUBLIC_KEY_LENGTH]);
 
 impl GenerateVerifiable for BandersnatchVrfVerifiable {
