@@ -31,6 +31,16 @@ impl GenerateVerifiable for Trivial {
 	) -> Result<(), ()> {
 		inter.try_push(who).map_err(|_| ())
 	}
+	fn push_members(
+		inter: &mut Self::Intermediate,
+		members: impl Iterator<Item = Self::Member>,
+		_chunks: &[Self::StaticChunk],
+	) -> Result<(), ()> {
+		for member in members {
+			inter.try_push(member).map_err(|_| ())?
+		}
+		Ok(())
+	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
 	}
@@ -132,6 +142,16 @@ impl GenerateVerifiable for Simple {
 		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
 	) -> Result<(), ()> {
 		inter.try_push(who).map_err(|_| ())
+	}
+	fn push_members(
+		inter: &mut Self::Intermediate,
+		members: impl Iterator<Item = Self::Member>,
+		_chunks: &[Self::StaticChunk],
+	) -> Result<(), ()> {
+		for member in members {
+			inter.try_push(member).map_err(|_| ())?
+		}
+		Ok(())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
