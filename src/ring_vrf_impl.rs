@@ -167,6 +167,24 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Ok(())
 	}
 
+	fn push_members(
+		intermediate: &mut Self::Intermediate,
+		members: impl Iterator<Item = Self::Member>,
+		chunks: &[Self::StaticChunk],
+	) -> Result<(), ()> {
+		let mut keys = vec![];
+		for member in members {
+			keys.push(Self::internal_member(&member).0);
+		}
+		intermediate.ring.append(&keys[..], |range| {
+			if range.end >= chunks.len() {
+				return Err(());
+			}
+			Ok((&chunks[range]).iter().map(|c| c.0).collect::<Vec<_>>())
+		});
+		Ok(())
+	}
+
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		let verifier_key = VerifierKey::from_ring_and_kzg_vk(&inter.ring, inter.kzg_raw_vk);
 		MembersCommitment(verifier_key)
@@ -372,6 +390,66 @@ mod tests {
 	}
 
 	#[test]
+	fn start_push_finish_multiple_members() {
+		let alice_sec = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
+		let bob_sec = BandersnatchVrfVerifiable::new_secret([1u8; 32]);
+		let charlie_sec = BandersnatchVrfVerifiable::new_secret([2u8; 32]);
+
+		let alice = BandersnatchVrfVerifiable::member_from_secret(&alice_sec);
+		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
+		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
+
+		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
+		let chunks: Vec<_> = vk.lag_g1.iter().cloned().map(|a| ArkScale(a)).collect();
+		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
+		let get_many = |range: Range<usize>| Ok(vk.lag_g1[range].to_vec());
+
+		let mut inter1 = BandersnatchVrfVerifiable::start_members();
+		let mut inter2 = BandersnatchVrfVerifiable::start_members_from_params(vk.kzg_vk, get_many);
+		let mut inter3 = BandersnatchVrfVerifiable::start_members();
+		let mut inter4 = BandersnatchVrfVerifiable::start_members();
+
+		assert_eq!(inter1, inter2);
+
+		BandersnatchVrfVerifiable::push_member(&mut inter1, alice.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter2, alice.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter1, bob.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter2, bob.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter1, charlie.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_member(&mut inter2, charlie.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter3,
+			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
+			&chunks[..],
+		)
+		.unwrap();
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter4,
+			[alice.clone()].into_iter(),
+			&chunks[..],
+		)
+		.unwrap();
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter4,
+			[bob.clone(), charlie.clone()].into_iter(),
+			&chunks[..],
+		)
+		.unwrap();
+
+		assert_eq!(inter1, inter2);
+		assert_eq!(inter2, inter3);
+		assert_eq!(inter3, inter4);
+
+		let members1 = BandersnatchVrfVerifiable::finish_members(inter1);
+		let members2 = BandersnatchVrfVerifiable::finish_members(inter2);
+		let members3 = BandersnatchVrfVerifiable::finish_members(inter3);
+		let members4 = BandersnatchVrfVerifiable::finish_members(inter4);
+		assert_eq!(members1, members2);
+		assert_eq!(members2, members3);
+		assert_eq!(members3, members4);
+	}
+
+	#[test]
 	fn test_plain_signature() {
 		let msg = b"asd";
 		let secret = BandersnatchVrfVerifiable::new_secret([0; 32]);
@@ -450,5 +528,50 @@ mod tests {
 		let alias3 = BandersnatchVrfVerifiable::alias_in_context(&secret, context).unwrap();
 		println!("* Alias: {} ms", (Instant::now() - start).as_millis());
 		assert_eq!(alias, alias3);
+	}
+
+	#[test]
+	fn open_validate_single_vs_multiple_keys() {
+		use std::time::Instant;
+
+		let start = Instant::now();
+		let _ = kzg();
+		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
+
+		let members: Vec<_> = (0..255)
+			.map(|i| {
+				let secret = BandersnatchVrfVerifiable::new_secret([i as u8; 32]);
+				BandersnatchVrfVerifiable::member_from_secret(&secret)
+			})
+			.collect();
+
+		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
+		let chunks: Vec<_> = vk.lag_g1.iter().cloned().map(|a| ArkScale(a)).collect();
+
+		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
+
+		let mut inter1 = BandersnatchVrfVerifiable::start_members();
+		let start = Instant::now();
+		members.iter().for_each(|member| {
+			BandersnatchVrfVerifiable::push_member(&mut inter1, member.clone(), get_one).unwrap();
+		});
+		println!(
+			"* Push {} members one at a time: {} ms",
+			members.len(),
+			(Instant::now() - start).as_millis()
+		);
+
+		let mut inter2 = BandersnatchVrfVerifiable::start_members();
+		let start = Instant::now();
+
+		BandersnatchVrfVerifiable::push_members(&mut inter2, members.iter().cloned(), &chunks[..])
+			.unwrap();
+		println!(
+			"* Push {} members simultaneously: {} ms",
+			members.len(),
+			(Instant::now() - start).as_millis()
+		);
+
+		assert_eq!(inter1, inter2);
 	}
 }

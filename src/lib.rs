@@ -85,7 +85,23 @@ pub trait GenerateVerifiable {
 		who: Self::Member,
 		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
 	) -> Result<(), ()>;
-	// push_members
+
+	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
+	/// value. This function is especially suitable for low domain sizes, as the provided `chunks`
+	/// must be the whole set of chunks available for a domain, such that a lookup `chunks[i]` would
+	/// yield the corresponding chunk for the `i`th key in the intermediate.
+	fn push_members(
+		intermediate: &mut Self::Intermediate,
+		members: impl Iterator<Item = Self::Member>,
+		chunks: &[Self::StaticChunk],
+	) -> Result<(), ()> {
+		let lookup = |chunk_idx| chunks.get(chunk_idx).cloned().ok_or(());
+		for member in members {
+			Self::push_member(intermediate, member, &lookup)?
+		}
+		Ok(())
+	}
+
 	/// Consume the `intermediate` value to create a new `Members` value.
 	fn finish_members(inter: Self::Intermediate) -> Self::Members;
 
