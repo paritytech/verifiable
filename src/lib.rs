@@ -5,7 +5,7 @@ extern crate core;
 
 use alloc::vec::Vec;
 
-use core::fmt::Debug;
+use core::{fmt::Debug, ops::Range};
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
@@ -79,13 +79,6 @@ pub trait GenerateVerifiable {
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
 
-	/// Introduce a new `Member` into the intermediate value used to build a new `Members` value.
-	fn push_member(
-		intermediate: &mut Self::Intermediate,
-		who: Self::Member,
-		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
-	) -> Result<(), ()>;
-
 	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
 	/// value. This function is especially suitable for low domain sizes, as the provided `chunks`
 	/// must be the whole set of chunks available for a domain, such that a lookup `chunks[i]` would
@@ -93,14 +86,8 @@ pub trait GenerateVerifiable {
 	fn push_members(
 		intermediate: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
-		chunks: &[Self::StaticChunk],
-	) -> Result<(), ()> {
-		let lookup = |chunk_idx| chunks.get(chunk_idx).cloned().ok_or(());
-		for member in members {
-			Self::push_member(intermediate, member, &lookup)?
-		}
-		Ok(())
-	}
+		lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
+	) -> Result<(), ()>;
 
 	/// Consume the `intermediate` value to create a new `Members` value.
 	fn finish_members(inter: Self::Intermediate) -> Self::Members;

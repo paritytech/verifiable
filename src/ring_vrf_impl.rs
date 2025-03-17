@@ -155,32 +155,17 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		}
 	}
 
-	fn push_member(
-		intermediate: &mut Self::Intermediate,
-		who: Self::Member,
-		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
-	) -> Result<(), ()> {
-		let who: Self::InternalMember = Self::internal_member(&who);
-		intermediate
-			.ring
-			.append(&[who.0], |range| Ok(vec![lookup(range.start)?.0]));
-		Ok(())
-	}
-
 	fn push_members(
 		intermediate: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
-		chunks: &[Self::StaticChunk],
+		lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()> {
 		let mut keys = vec![];
 		for member in members {
 			keys.push(Self::internal_member(&member).0);
 		}
 		intermediate.ring.append(&keys[..], |range| {
-			if range.end >= chunks.len() {
-				return Err(());
-			}
-			Ok((&chunks[range]).iter().map(|c| c.0).collect::<Vec<_>>())
+			Ok(lookup(range)?.into_iter().map(|c| c.0).collect::<Vec<_>>())
 		});
 		Ok(())
 	}
@@ -369,19 +354,43 @@ mod tests {
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
 
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
-		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
 		let get_many = |range: Range<usize>| Ok(vk.lag_g1[range].to_vec());
+		let get_many_arkscale = |range: Range<usize>| {
+			Ok(vk.lag_g1[range]
+				.iter()
+				.cloned()
+				.map(|a| ArkScale(a))
+				.collect())
+		};
 
 		let mut inter1 = BandersnatchVrfVerifiable::start_members();
 		let mut inter2 = BandersnatchVrfVerifiable::start_members_from_params(vk.kzg_vk, get_many);
 		assert_eq!(inter1, inter2);
 
-		BandersnatchVrfVerifiable::push_member(&mut inter1, alice.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter2, alice.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter1, bob.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter2, bob.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter1, charlie.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter2, charlie.clone(), get_one).unwrap();
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter1,
+			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
+			get_many_arkscale,
+		)
+		.unwrap();
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter2,
+			[alice.clone()].into_iter(),
+			get_many_arkscale,
+		)
+		.unwrap();
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter2,
+			[bob.clone()].into_iter(),
+			get_many_arkscale,
+		)
+		.unwrap();
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter2,
+			[charlie.clone()].into_iter(),
+			get_many_arkscale,
+		)
+		.unwrap();
 		assert_eq!(inter1, inter2);
 
 		let members1 = BandersnatchVrfVerifiable::finish_members(inter1);
@@ -401,38 +410,54 @@ mod tests {
 
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
 		let chunks: Vec<_> = vk.lag_g1.iter().cloned().map(|a| ArkScale(a)).collect();
-		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
-		let get_many = |range: Range<usize>| Ok(vk.lag_g1[range].to_vec());
+		let get_many = |range: Range<usize>| Ok(chunks[range].to_vec());
 
+		// First set is everyone all at once with the regular starting root.
 		let mut inter1 = BandersnatchVrfVerifiable::start_members();
-		let mut inter2 = BandersnatchVrfVerifiable::start_members_from_params(vk.kzg_vk, get_many);
+		// Second set is everyone all at once but with a starting root constructed from params.
+		let mut inter2 = BandersnatchVrfVerifiable::start_members_from_params(vk.kzg_vk, |range| {
+			Ok(vk.lag_g1[range].to_vec())
+		});
+		// Third set is everyone added one by one.
 		let mut inter3 = BandersnatchVrfVerifiable::start_members();
+		// Fourth set is a single addition followed by a group addition.
 		let mut inter4 = BandersnatchVrfVerifiable::start_members();
 
-		assert_eq!(inter1, inter2);
+		// Construct the first set with all members added simultaneously.
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter1,
+			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
+			get_many,
+		)
+		.unwrap();
 
-		BandersnatchVrfVerifiable::push_member(&mut inter1, alice.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter2, alice.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter1, bob.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter2, bob.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter1, charlie.clone(), get_one).unwrap();
-		BandersnatchVrfVerifiable::push_member(&mut inter2, charlie.clone(), get_one).unwrap();
+		// Construct the second set with all members added simultaneously.
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter2,
+			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
+			get_many,
+		)
+		.unwrap();
+
+		// Construct the third set with all members added sequentially.
+		BandersnatchVrfVerifiable::push_members(&mut inter3, [alice.clone()].into_iter(), get_many)
+			.unwrap();
+		BandersnatchVrfVerifiable::push_members(&mut inter3, [bob.clone()].into_iter(), get_many)
+			.unwrap();
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter3,
-			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
-			&chunks[..],
+			[charlie.clone()].into_iter(),
+			get_many,
 		)
 		.unwrap();
-		BandersnatchVrfVerifiable::push_members(
-			&mut inter4,
-			[alice.clone()].into_iter(),
-			&chunks[..],
-		)
-		.unwrap();
+
+		// Construct the fourth set with the first member joining alone, followed by the other members joining together.
+		BandersnatchVrfVerifiable::push_members(&mut inter4, [alice.clone()].into_iter(), get_many)
+			.unwrap();
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter4,
 			[bob.clone(), charlie.clone()].into_iter(),
-			&chunks[..],
+			get_many,
 		)
 		.unwrap();
 
@@ -492,7 +517,13 @@ mod tests {
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
-		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
+		let get_many = |range: Range<usize>| {
+			Ok(vk.lag_g1[range]
+				.to_vec()
+				.into_iter()
+				.map(|a| ArkScale(a))
+				.collect())
+		};
 
 		let start = Instant::now();
 		let mut inter = BandersnatchVrfVerifiable::start_members();
@@ -503,7 +534,12 @@ mod tests {
 
 		let start = Instant::now();
 		members.iter().for_each(|member| {
-			BandersnatchVrfVerifiable::push_member(&mut inter, member.clone(), get_one).unwrap();
+			BandersnatchVrfVerifiable::push_members(
+				&mut inter,
+				[member.clone()].into_iter(),
+				get_many,
+			)
+			.unwrap();
 		});
 		println!(
 			"* Push {} members: {} ms",
@@ -548,12 +584,17 @@ mod tests {
 		let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
 		let chunks: Vec<_> = vk.lag_g1.iter().cloned().map(|a| ArkScale(a)).collect();
 
-		let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
+		let get_many = |range: Range<usize>| Ok(chunks[range].to_vec());
 
 		let mut inter1 = BandersnatchVrfVerifiable::start_members();
 		let start = Instant::now();
 		members.iter().for_each(|member| {
-			BandersnatchVrfVerifiable::push_member(&mut inter1, member.clone(), get_one).unwrap();
+			BandersnatchVrfVerifiable::push_members(
+				&mut inter1,
+				[member.clone()].into_iter(),
+				get_many,
+			)
+			.unwrap();
 		});
 		println!(
 			"* Push {} members one at a time: {} ms",
@@ -564,7 +605,7 @@ mod tests {
 		let mut inter2 = BandersnatchVrfVerifiable::start_members();
 		let start = Instant::now();
 
-		BandersnatchVrfVerifiable::push_members(&mut inter2, members.iter().cloned(), &chunks[..])
+		BandersnatchVrfVerifiable::push_members(&mut inter2, members.iter().cloned(), get_many)
 			.unwrap();
 		println!(
 			"* Push {} members simultaneously: {} ms",
