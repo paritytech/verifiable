@@ -80,9 +80,10 @@ pub trait GenerateVerifiable {
 	fn start_members() -> Self::Intermediate;
 
 	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
-	/// value. This function is especially suitable for low domain sizes, as the provided `chunks`
-	/// must be the whole set of chunks available for a domain, such that a lookup `chunks[i]` would
-	/// yield the corresponding chunk for the `i`th key in the intermediate.
+	/// value.
+	///
+	/// An error is returned if at least one member failed to be pushed. This can happen if the
+	/// maximum capacity has already been reached or the member is already part of the set.
 	fn push_members(
 		intermediate: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
