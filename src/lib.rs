@@ -5,7 +5,7 @@ extern crate core;
 
 use alloc::vec::Vec;
 
-use core::fmt::Debug;
+use core::{fmt::Debug, ops::Range};
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
@@ -79,13 +79,17 @@ pub trait GenerateVerifiable {
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
 
-	/// Introduce a new `Member` into the intermediate value used to build a new `Members` value.
-	fn push_member(
+	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
+	/// value.
+	///
+	/// An error is returned if at least one member failed to be pushed. This can happen if the
+	/// maximum capacity has already been reached or the member is already part of the set.
+	fn push_members(
 		intermediate: &mut Self::Intermediate,
-		who: Self::Member,
-		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+		members: impl Iterator<Item = Self::Member>,
+		lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()>;
-	// push_members
+
 	/// Consume the `intermediate` value to create a new `Members` value.
 	fn finish_members(inter: Self::Intermediate) -> Self::Members;
 
