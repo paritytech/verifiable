@@ -43,14 +43,14 @@ macro_rules! impl_scale {
 }
 
 #[cfg(feature = "std")]
-fn ring_context() -> &'static bandersnatch::RingContext {
+fn ring_proof_params() -> &'static bandersnatch::RingProofParams {
 	use ark_ec_vrfs::ring::PcsParams;
 	use std::sync::OnceLock;
-	static CELL: OnceLock<bandersnatch::RingContext> = OnceLock::new();
+	static CELL: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
 	CELL.get_or_init(|| {
 		let pcs_params =
 			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(PCS_PARAMS_ZCASH).unwrap();
-		bandersnatch::RingContext::from_srs(RING_SIZE, pcs_params).unwrap()
+		bandersnatch::RingProofParams::from_srs(RING_SIZE, pcs_params).unwrap()
 	})
 }
 
@@ -180,7 +180,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		// This doesn't require the whole kzg. Thus is more appropriate if used on-chain
 		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
 		let ring_verifier =
-			bandersnatch::RingContext::verifier_no_context(members.0.clone(), RING_SIZE);
+			bandersnatch::RingProofParams::verifier_no_context(members.0.clone(), RING_SIZE);
 
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
@@ -247,7 +247,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let member: Self::InternalMember = Self::internal_member(member);
 		let member_idx = pks.iter().position(|&m| m == member.0).ok_or(())?;
 		let member_idx = member_idx as u32;
-		let prover_key = ring_context().prover_key(&pks[..]);
+		let prover_key = ring_proof_params().prover_key(&pks[..]);
 		Ok((member_idx, prover_key.into()))
 	}
 
@@ -268,12 +268,12 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> Result<(Self::Proof, Alias), ()> {
 		use ark_ec_vrfs::ring::Prover;
 		let (prover_idx, prover_key) = commitment;
-		let ctx = ring_context();
-		if prover_idx >= ctx.max_ring_size() as u32 {
+		let params = ring_proof_params();
+		if prover_idx >= params.max_ring_size() as u32 {
 			return Err(());
 		}
 
-		let ring_prover = ctx.prover(prover_key.0, prover_idx as usize);
+		let ring_prover = params.prover(prover_key.0, prover_idx as usize);
 
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
@@ -337,7 +337,7 @@ mod tests {
 
 	impl BandersnatchVrfVerifiable {
 		fn start_members_from_params() -> (MembersSet, RingBuilderPcsParams) {
-			let (builder, builder_pcs_params) = ring_context().verifier_key_builder();
+			let (builder, builder_pcs_params) = ring_proof_params().verifier_key_builder();
 			(MembersSet(builder), builder_pcs_params)
 		}
 	}
@@ -427,7 +427,7 @@ mod tests {
 		let message = b"FooBar";
 
 		let start = Instant::now();
-		let _ = ring_context();
+		let _ = ring_proof_params();
 		println!(
 			"* PCS params decode: {} ms",
 			(Instant::now() - start).as_millis()
