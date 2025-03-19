@@ -10,8 +10,7 @@ use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEn
 use scale_info::*;
 
 pub mod demo_impls;
-// pub mod ring_vrf_impl;
-pub mod ring_vrf_impl2;
+pub mod ring_vrf_impl;
 
 // Fixed types:
 

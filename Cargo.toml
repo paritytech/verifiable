@@ -10,13 +10,10 @@ derive-where = "1.2"
 bounded-collections = { version = "0.1.8", default-features = false }
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
-# TODO: optional under demo-impl feature
 schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-#bandersnatch_vrfs = { git = "https://github.com/davxy/ring-vrf.git", branch = "locked", default-features = false }
-# ark-ec-vrfs = { git = "https://github.com/davxy/ark-ec-vrfs", default-features = false, features = ["bandersnatch", "ring"]}
-ark-ec-vrfs = { path = "/mnt/ssd/develop/personal/ark-ec-vrfs", default-features = false, features = ["bandersnatch", "ring"]}
+ark-ec-vrfs = { git = "https://github.com/davxy/ark-ec-vrfs", default-features = false, features = ["bandersnatch", "ring"]}
 
 [dev-dependencies]
 rand_core = "0.6"
