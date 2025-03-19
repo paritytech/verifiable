@@ -15,13 +15,12 @@ pub(crate) const PCS_PARAMS_ZCASH: &[u8] =
 	include_bytes!("ring-data/zcash-srs-2-16-uncompressed.bin");
 
 #[cfg(feature = "small-ring")]
-pub const RING_SIZE: usize = 255; // TODO
+pub const RING_SIZE: usize = 255;
 
 #[cfg(not(feature = "small-ring"))]
-pub const RING_SIZE: usize = 255; // TODO
+pub const RING_SIZE: usize = 1023;
 
-const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchInput";
-const THIN_SIGNATURE_CONTEXT: &[u8] = b"VerifiableBandersnatchThinSignature";
+const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
 
 macro_rules! impl_scale {
 	($type_name:ident, $encoded_size:expr) => {
@@ -139,8 +138,12 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type StaticChunk = StaticChunk;
 
 	fn start_members() -> Self::Intermediate {
+		#[cfg(feature = "small-ring")]
 		const EMPTY_RING_COMMITMENT_DATA: &[u8] =
-			include_bytes!("ring-data/zcash-ring-builder.bin");
+			include_bytes!("ring-data/zcash-small-ring-builder.bin");
+		#[cfg(not(feature = "small-ring"))]
+		const EMPTY_RING_COMMITMENT_DATA: &[u8] =
+			include_bytes!("ring-data/zcash-full-ring-builder.bin");
 		MembersSet::deserialize_uncompressed_unchecked(EMPTY_RING_COMMITMENT_DATA).unwrap()
 	}
 
@@ -205,7 +208,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	// This can be discussed depending on the usage of this `sign`
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
 		use ark_ec_vrfs::ietf::Prover;
-		let input_msg = [THIN_SIGNATURE_CONTEXT, message].concat();
+		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
 		let output = secret.output(input);
 
@@ -226,7 +229,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> bool {
 		use ark_ec_vrfs::ietf::Verifier;
 		let signature = IetfVrfSignature::deserialize_compressed(signature.as_slice()).unwrap();
-		let input_msg = [THIN_SIGNATURE_CONTEXT, message].concat();
+		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
 		let member = Self::internal_member(member);
 		let public = bandersnatch::Public::from(member.0);
@@ -345,9 +348,15 @@ mod tests {
 	#[ignore = "empty ring builder"]
 	fn generate_empty_ring_builder() {
 		use std::io::Write;
+		#[cfg(feature = "small-ring")]
 		const EMPTY_RING_COMMITMENT_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-ring-builder.bin"
+			"/src/ring-data/zcash-small-ring-builder.bin"
+		);
+		#[cfg(not(feature = "small-ring"))]
+		const EMPTY_RING_COMMITMENT_FILE: &str = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/src/ring-data/zcash-full-ring-builder.bin"
 		);
 		let (builder, builder_pcs_params) = BandersnatchVrfVerifiable::start_members_from_params();
 		let mut buf = Vec::with_capacity(builder.uncompressed_size());
