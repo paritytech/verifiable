@@ -57,9 +57,7 @@ fn ring_context() -> &'static bandersnatch::RingContext {
 #[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MembersSet(bandersnatch::RingVerifierKeyBuilder);
 
-// TODO: check
-const MEMBERS_SET_SIZE: usize = 4 * 48 + 2 * 96 + 32 + 2 * 4; // 4 bls G1 + 2 bls G2 + jubjub + 2 usize
-impl_scale!(MembersSet, MEMBERS_SET_SIZE);
+impl_scale!(MembersSet, 432);
 
 impl core::fmt::Debug for MembersSet {
 	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -78,9 +76,7 @@ impl core::cmp::Eq for MembersSet {}
 #[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MembersCommitment(bandersnatch::RingVerifierKey);
 
-// TODO: check
-const MEMBERS_COMMITMENT_SIZE: usize = 4 * 48 + 2 * 96; // 4 bls G1 + 2 bls G2
-impl_scale!(MembersCommitment, MEMBERS_COMMITMENT_SIZE);
+impl_scale!(MembersCommitment, 384);
 
 impl core::fmt::Debug for MembersCommitment {
 	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -95,39 +91,34 @@ impl core::cmp::PartialEq for MembersCommitment {
 }
 impl core::cmp::Eq for MembersCommitment {}
 
-const PUBLIC_KEY_LENGTH: usize = 32;
+const PUBLIC_KEY_SIZE: usize = 32;
 
 #[derive(
 	Clone, Eq, PartialEq, Debug, Encode, Decode, TypeInfo, MaxEncodedLen, DecodeWithMemTracking,
 )]
-pub struct EncodedPublicKey(pub [u8; PUBLIC_KEY_LENGTH]);
+pub struct EncodedPublicKey(pub [u8; PUBLIC_KEY_SIZE]);
 
 #[derive(Clone, Eq, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct InternalPublicKey(bandersnatch::AffinePoint);
-
-impl_scale!(InternalPublicKey, PUBLIC_KEY_LENGTH);
+pub struct PublicKey(bandersnatch::AffinePoint);
+impl_scale!(PublicKey, PUBLIC_KEY_SIZE);
 
 #[derive(Clone, Eq, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StaticChunk(ark_ec_vrfs::ring::G1Affine<bandersnatch::BandersnatchSha512Ell2>);
-
-const G1_POINT_LENGTH: usize = 48;
-impl_scale!(StaticChunk, G1_POINT_LENGTH);
-
-const IETF_SIGNATURE_SIZE: usize = 96;
+impl_scale!(StaticChunk, 48);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct IetfVrfSignature {
 	output: bandersnatch::Output,
 	proof: bandersnatch::IetfProof,
 }
-
-const RING_SIGNATURE_SIZE: usize = 788;
+const IETF_SIGNATURE_SIZE: usize = 96;
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct RingVrfSignature {
 	output: bandersnatch::Output,
 	proof: bandersnatch::RingProof,
 }
+const RING_SIGNATURE_SIZE: usize = 788;
 
 #[inline(always)]
 fn make_alias(output: &bandersnatch::Output) -> Alias {
@@ -140,7 +131,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Members = MembersCommitment;
 	type Intermediate = MembersSet;
 	type Member = EncodedPublicKey;
-	type InternalMember = InternalPublicKey;
+	type InternalMember = PublicKey;
 	type Secret = bandersnatch::Secret;
 	type Commitment = (u32, ArkScale<bandersnatch::RingProverKey>);
 	type Proof = [u8; RING_SIGNATURE_SIZE];
@@ -176,7 +167,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	}
 
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
-		Self::external_member(&InternalPublicKey(secret.public().0))
+		Self::external_member(&PublicKey(secret.public().0))
 	}
 
 	fn validate(
@@ -323,7 +314,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	}
 
 	fn external_member(value: &Self::InternalMember) -> Self::Member {
-		let mut bytes = [0u8; PUBLIC_KEY_LENGTH];
+		let mut bytes = [0u8; PUBLIC_KEY_SIZE];
 		value.using_encoded(|encoded| {
 			bytes.copy_from_slice(encoded);
 		});
@@ -333,7 +324,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	fn internal_member(value: &Self::Member) -> Self::InternalMember {
 		let pt =
 			bandersnatch::AffinePoint::deserialize_compressed(&value.0[..]).expect("must be valid");
-		InternalPublicKey(pt.into())
+		PublicKey(pt.into())
 	}
 }
 
@@ -351,8 +342,8 @@ mod tests {
 		}
 	}
 
-	// TODO: skip
 	#[test]
+	#[ignore = "empty ring builder"]
 	fn generate_empty_ring_builder() {
 		use std::io::Write;
 		const EMPTY_RING_COMMITMENT_FILE: &str = concat!(
@@ -368,8 +359,20 @@ mod tests {
 	}
 
 	#[test]
-	fn check_backend_assumptions() {
-		todo!("Check serialized sizes");
+	fn check_precomputed_size() {
+		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
+		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
+		let internal = BandersnatchVrfVerifiable::internal_member(&public);
+		assert_eq!(internal.compressed_size(), PublicKey::max_encoded_len());
+
+		let members = BandersnatchVrfVerifiable::start_members();
+		assert_eq!(members.compressed_size(), MembersSet::max_encoded_len());
+
+		let commitment = BandersnatchVrfVerifiable::finish_members(members);
+		assert_eq!(
+			commitment.compressed_size(),
+			MembersCommitment::max_encoded_len()
+		);
 	}
 
 	#[test]
