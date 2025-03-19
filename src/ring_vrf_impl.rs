@@ -139,7 +139,8 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type StaticChunk = StaticChunk;
 
 	fn start_members() -> Self::Intermediate {
-		const EMPTY_RING_COMMITMENT_DATA: &[u8] = include_bytes!("ring-data/ring-builder.bin");
+		const EMPTY_RING_COMMITMENT_DATA: &[u8] =
+			include_bytes!("ring-data/zcash-ring-builder.bin");
 		MembersSet::deserialize_uncompressed_unchecked(EMPTY_RING_COMMITMENT_DATA).unwrap()
 	}
 
@@ -200,17 +201,15 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Ok(make_alias(&signature.output))
 	}
 
-	// TODO: implement a plain Schnorr signature for Bandersnatch
+	// TODO @davxy: maybe implement a plain Schnorr signature for Bandersnatch?
+	// This can be discussed depending on the usage of this `sign`
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
 		use ark_ec_vrfs::ietf::Prover;
-		// let mut transcript = Transcript::new_labeled(THIN_SIGNATURE_CONTEXT);
-		// transcript.append_slice(message);
 		let input_msg = [THIN_SIGNATURE_CONTEXT, message].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
 		let output = secret.output(input);
 
 		let proof = secret.prove(input, output, b"");
-
 		let signature = IetfVrfSignature { output, proof };
 
 		let mut raw = [0u8; IETF_SIGNATURE_SIZE];
@@ -348,7 +347,7 @@ mod tests {
 		use std::io::Write;
 		const EMPTY_RING_COMMITMENT_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/ring-builder.bin"
+			"/src/ring-data/zcash-ring-builder.bin"
 		);
 		let (builder, builder_pcs_params) = BandersnatchVrfVerifiable::start_members_from_params();
 		let mut buf = Vec::with_capacity(builder.uncompressed_size());
