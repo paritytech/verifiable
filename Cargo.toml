@@ -13,7 +13,7 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-ark-ec-vrfs = { git = "https://github.com/davxy/ark-ec-vrfs", default-features = false, features = ["bandersnatch", "ring"]}
+ark-ec-vrfs = { git = "https://github.com/davxy/ark-ec-vrfs", default-features = false, features = ["bandersnatch", "ring", "parallel"] }
 
 [dev-dependencies]
 rand_core = "0.6"

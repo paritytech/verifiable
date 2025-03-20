@@ -14,11 +14,17 @@ use super::*;
 pub(crate) const PCS_PARAMS_ZCASH: &[u8] =
 	include_bytes!("ring-data/zcash-srs-2-16-uncompressed.bin");
 
+const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
+	ark_ec_vrfs::ring::max_ring_size_from_pcs_domain_size::<bandersnatch::BandersnatchSha512Ell2>(
+		pcs_domain_size,
+	)
+}
+
 #[cfg(feature = "small-ring")]
-pub const RING_SIZE: usize = 255;
+pub const RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 11);
 
 #[cfg(not(feature = "small-ring"))]
-pub const RING_SIZE: usize = 1023;
+pub const RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 16);
 
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
 
@@ -47,9 +53,10 @@ fn ring_proof_params() -> &'static bandersnatch::RingProofParams {
 	use std::sync::OnceLock;
 	static CELL: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
 	CELL.get_or_init(|| {
+		println!("MAX RING SIZE: {}", RING_SIZE);
 		let pcs_params =
 			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(PCS_PARAMS_ZCASH).unwrap();
-		bandersnatch::RingProofParams::from_srs(RING_SIZE, pcs_params).unwrap()
+		bandersnatch::RingProofParams::from_pcs_params(RING_SIZE, pcs_params).unwrap()
 	})
 }
 
@@ -334,6 +341,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 mod tests {
 	use super::*;
 	use ark_ec_vrfs::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
+	use ark_serialize::Valid;
 
 	type RingBuilderPcsParams = ark_ec_vrfs::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
@@ -345,7 +353,7 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore = "empty ring builder"]
+	// #[ignore = "empty ring builder"]
 	fn generate_empty_ring_builder() {
 		use std::io::Write;
 		#[cfg(feature = "small-ring")]
