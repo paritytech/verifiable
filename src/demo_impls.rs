@@ -24,12 +24,15 @@ impl GenerateVerifiable for Trivial {
 		BoundedVec::new()
 	}
 
-	fn push_member(
+	fn push_members(
 		inter: &mut Self::Intermediate,
-		who: Self::Member,
-		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+		members: impl Iterator<Item = Self::Member>,
+		_lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()> {
-		inter.try_push(who).map_err(|_| ())
+		for member in members {
+			inter.try_push(member).map_err(|_| ())?
+		}
+		Ok(())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
@@ -126,12 +129,15 @@ impl GenerateVerifiable for Simple {
 		BoundedVec::new()
 	}
 
-	fn push_member(
+	fn push_members(
 		inter: &mut Self::Intermediate,
-		who: Self::Member,
-		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+		members: impl Iterator<Item = Self::Member>,
+		_lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()> {
-		inter.try_push(who).map_err(|_| ())
+		for member in members {
+			inter.try_push(member).map_err(|_| ())?
+		}
+		Ok(())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
@@ -240,8 +246,16 @@ mod tests {
 		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
 		let mut inter = <Simple as GenerateVerifiable>::start_members();
-		<Simple as GenerateVerifiable>::push_member(&mut inter, alice.clone(), |_| Ok(())).unwrap();
-		<Simple as GenerateVerifiable>::push_member(&mut inter, bob.clone(), |_| Ok(())).unwrap();
+		<Simple as GenerateVerifiable>::push_members(
+			&mut inter,
+			[alice.clone()].into_iter(),
+			|_| Ok(vec![()]),
+		)
+		.unwrap();
+		<Simple as GenerateVerifiable>::push_members(&mut inter, [bob.clone()].into_iter(), |_| {
+			Ok(vec![()])
+		})
+		.unwrap();
 		let members = <Simple as GenerateVerifiable>::finish_members(inter);
 
 		type SimpleReceipt = Receipt<Simple>;
