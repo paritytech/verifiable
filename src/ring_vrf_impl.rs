@@ -160,9 +160,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		for member in members {
 			keys.push(Self::internal_member(&member).0);
 		}
-		// intermediate.ring.append(&keys[..], |range| {
-		// 	Ok(lookup(range)?.into_iter().map(|c| c.0).collect::<Vec<_>>())
-		// });
 		let loader = |range: Range<usize>| {
 			let items = lookup(range)
 				.ok()?
@@ -173,19 +170,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		};
 		intermediate.0.append(&keys[..], loader).map_err(|_| ())
 	}
-
-	// fn push_member(
-	// 	intermediate: &mut Self::Intermediate,
-	// 	who: Self::Member,
-	// 	lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
-	// ) -> Result<(), ()> {
-	// 	let who: Self::InternalMember = Self::internal_member(&who);
-	// 	let loader = |range: Range<usize>| {
-	// 		let item = lookup(range.start).ok()?.0;
-	// 		Some(vec![item])
-	// 	};
-	// 	intermediate.0.append(&[who.0], loader).map_err(|_| ())
-	// }
 
 	fn finish_members(intermediate: Self::Intermediate) -> Self::Members {
 		let verifier_key = intermediate.0.finalize();
@@ -592,8 +576,6 @@ mod tests {
 			(Instant::now() - start).as_millis()
 		);
 
-		// members.iter().for_each(|member| {
-		// 	BandersnatchVrfVerifiable::push_member(&mut inter, member.clone(), get_one).unwrap();
 		let start = Instant::now();
 		members.iter().for_each(|member| {
 			BandersnatchVrfVerifiable::push_members(
