@@ -1,10 +1,8 @@
-#![allow(unused)]
-
 use alloc::vec;
 use core::ops::Range;
 
 use ark_ec_vrfs::{ring::Verifier, suites::bandersnatch};
-use ark_scale::{impl_scale_via_ark, ArkScale, ArkScaleMaxEncodedLen};
+use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use scale_info::TypeInfo;
 
@@ -49,7 +47,6 @@ macro_rules! impl_scale {
 
 #[cfg(feature = "std")]
 fn ring_proof_params() -> &'static bandersnatch::RingProofParams {
-	use ark_ec_vrfs::ring::PcsParams;
 	use std::sync::OnceLock;
 	static CELL: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
 	CELL.get_or_init(|| {
@@ -164,8 +161,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			let item = lookup(range.start).ok()?.0;
 			Some(vec![item])
 		};
-		intermediate.0.append(&[who.0], loader);
-		Ok(())
+		intermediate.0.append(&[who.0], loader).map_err(|_| ())
 	}
 
 	fn finish_members(intermediate: Self::Intermediate) -> Self::Members {
@@ -187,7 +183,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
-		use ark_ec_vrfs::ring::Prover;
 		// This doesn't require the whole kzg. Thus is more appropriate if used on-chain
 		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
 		let ring_verifier =
@@ -341,7 +336,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 mod tests {
 	use super::*;
 	use ark_ec_vrfs::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
-	use ark_serialize::Valid;
 
 	type RingBuilderPcsParams = ark_ec_vrfs::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
@@ -353,7 +347,7 @@ mod tests {
 	}
 
 	#[test]
-	// #[ignore = "empty ring builder"]
+	#[ignore = "empty ring builder"]
 	fn generate_empty_ring_builder() {
 		use std::io::Write;
 		#[cfg(feature = "small-ring")]
@@ -366,7 +360,7 @@ mod tests {
 			env!("CARGO_MANIFEST_DIR"),
 			"/src/ring-data/zcash-full-ring-builder.bin"
 		);
-		let (builder, builder_pcs_params) = BandersnatchVrfVerifiable::start_members_from_params();
+		let (builder, _builder_lookup) = BandersnatchVrfVerifiable::start_members_from_params();
 		let mut buf = Vec::with_capacity(builder.uncompressed_size());
 		builder.serialize_uncompressed(&mut buf).unwrap();
 		println!("Writing empty ring to: {}", EMPTY_RING_COMMITMENT_FILE);
@@ -470,7 +464,8 @@ mod tests {
 		println!("* Create: {} ms", (Instant::now() - start).as_millis());
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
-		let (mut builder, builder_params) = BandersnatchVrfVerifiable::start_members_from_params();
+		// `builder_params` can be serialized/deserialized to be loaded when required
+		let (_, builder_params) = BandersnatchVrfVerifiable::start_members_from_params();
 
 		let get_one = |i| {
 			(&builder_params)
