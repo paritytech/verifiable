@@ -13,7 +13,7 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-ark-ec-vrfs = { version = "0.1.2", default-features = false, features = ["bandersnatch", "ring", "parallel"] }
+ark-ec-vrfs = { version = "0.1.2", default-features = false, features = ["bandersnatch", "ring"] }
 
 [dev-dependencies]
 rand_core = "0.6"
@@ -27,7 +27,8 @@ std = [
   "schnorrkel/std",
   "ark-serialize/std",
   "ark-scale/std",
-  "ark-ec-vrfs/std"
+  "ark-ec-vrfs/std",
+  "ark-ec-vrfs/parallel"
 ]
 # Small (2^9) zcash params (defaults to 2^16)
 # Mostly useful for testing

@@ -1,7 +1,12 @@
 use alloc::vec;
 use core::ops::Range;
 
-use ark_ec_vrfs::{ring::Verifier, suites::bandersnatch};
+pub use ark_ec_vrfs;
+
+use ark_ec_vrfs::{
+	ring::Verifier,
+	suites::bandersnatch::{self, BandersnatchSha512Ell2},
+};
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use scale_info::TypeInfo;
@@ -12,6 +17,7 @@ use super::*;
 pub(crate) const PCS_PARAMS_ZCASH: &[u8] =
 	include_bytes!("ring-data/zcash-srs-2-16-uncompressed.bin");
 
+/// The max ring that can be handled for both sign/verify for the given PCS domain size.
 const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
 	ark_ec_vrfs::ring::max_ring_size_from_pcs_domain_size::<bandersnatch::BandersnatchSha512Ell2>(
 		pcs_domain_size,
@@ -19,12 +25,29 @@ const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
 }
 
 #[cfg(feature = "small-ring")]
-pub const RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 11);
-
+mod ring_params {
+	use super::*;
+	/// 255
+	pub const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 11);
+	/// Ring parameters file
+	pub const RING_BUILDER_PARAMS: &[u8] =
+		include_bytes!("ring-data/zcash-ring-builder-params-small.bin");
+}
 #[cfg(not(feature = "small-ring"))]
-pub const RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 16);
+mod ring_params {
+	use super::*;
+	/// 16127
+	pub const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 16);
+	/// Ring parameters file
+	pub const RING_BUILDER_PARAMS: &[u8] =
+		include_bytes!("ring-data/zcash-ring-builder-params-full.bin");
+}
+use ring_params::*;
 
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
+
+/// A sequence of static chunks.
+pub type RingBuilderParams = ark_ec_vrfs::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
 macro_rules! impl_scale {
 	($type_name:ident, $encoded_size:expr) => {
@@ -45,16 +68,26 @@ macro_rules! impl_scale {
 	};
 }
 
+/// Get ring proof params for signing operations.
 #[cfg(feature = "std")]
-fn ring_proof_params() -> &'static bandersnatch::RingProofParams {
-	use std::sync::OnceLock;
+fn ring_prover_params() -> &'static bandersnatch::RingProofParams {
+	use ark_ec_vrfs::reexports::ark_std::sync::OnceLock;
 	static CELL: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
 	CELL.get_or_init(|| {
-		println!("MAX RING SIZE: {}", RING_SIZE);
 		let pcs_params =
 			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(PCS_PARAMS_ZCASH).unwrap();
-		bandersnatch::RingProofParams::from_pcs_params(RING_SIZE, pcs_params).unwrap()
+		bandersnatch::RingProofParams::from_pcs_params(MAX_RING_SIZE, pcs_params).unwrap()
 	})
+}
+
+/// Get ring builder params.
+pub fn ring_verifier_builder_params() -> RingBuilderParams {
+	use ark_ec_vrfs::ring::G1Affine;
+	let inner = <Vec<G1Affine<BandersnatchSha512Ell2>>>::deserialize_uncompressed_unchecked(
+		RING_BUILDER_PARAMS,
+	)
+	.unwrap();
+	ark_ec_vrfs::ring::RingBuilderPcsParams::<BandersnatchSha512Ell2>(inner)
 }
 
 #[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
@@ -106,7 +139,7 @@ pub struct PublicKey(bandersnatch::AffinePoint);
 impl_scale!(PublicKey, PUBLIC_KEY_SIZE);
 
 #[derive(Clone, Eq, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StaticChunk(ark_ec_vrfs::ring::G1Affine<bandersnatch::BandersnatchSha512Ell2>);
+pub struct StaticChunk(pub ark_ec_vrfs::ring::G1Affine<bandersnatch::BandersnatchSha512Ell2>);
 impl_scale!(StaticChunk, 48);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
@@ -114,14 +147,14 @@ struct IetfVrfSignature {
 	output: bandersnatch::Output,
 	proof: bandersnatch::IetfProof,
 }
-const IETF_SIGNATURE_SIZE: usize = 96;
+const PLAIN_VRF_SIGNATURE_SIZE: usize = 96;
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct RingVrfSignature {
 	output: bandersnatch::Output,
 	proof: bandersnatch::RingProof,
 }
-const RING_SIGNATURE_SIZE: usize = 788;
+const RING_VRF_SIGNATURE_SIZE: usize = 788;
 
 #[inline(always)]
 fn make_alias(output: &bandersnatch::Output) -> Alias {
@@ -137,17 +170,17 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type InternalMember = PublicKey;
 	type Secret = bandersnatch::Secret;
 	type Commitment = (u32, ArkScale<bandersnatch::RingProverKey>);
-	type Proof = [u8; RING_SIGNATURE_SIZE];
-	type Signature = [u8; IETF_SIGNATURE_SIZE];
+	type Proof = [u8; RING_VRF_SIGNATURE_SIZE];
+	type Signature = [u8; PLAIN_VRF_SIGNATURE_SIZE];
 	type StaticChunk = StaticChunk;
 
 	fn start_members() -> Self::Intermediate {
 		#[cfg(feature = "small-ring")]
 		const EMPTY_RING_COMMITMENT_DATA: &[u8] =
-			include_bytes!("ring-data/zcash-small-ring-builder.bin");
+			include_bytes!("ring-data/zcash-ring-builder-small.bin");
 		#[cfg(not(feature = "small-ring"))]
 		const EMPTY_RING_COMMITMENT_DATA: &[u8] =
-			include_bytes!("ring-data/zcash-full-ring-builder.bin");
+			include_bytes!("ring-data/zcash-ring-builder-full.bin");
 		MembersSet::deserialize_uncompressed_unchecked(EMPTY_RING_COMMITMENT_DATA).unwrap()
 	}
 
@@ -193,7 +226,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		// This doesn't require the whole kzg. Thus is more appropriate if used on-chain
 		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
 		let ring_verifier =
-			bandersnatch::RingProofParams::verifier_no_context(members.0.clone(), RING_SIZE);
+			bandersnatch::RingProofParams::verifier_no_context(members.0.clone(), MAX_RING_SIZE);
 
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
@@ -213,8 +246,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Ok(make_alias(&signature.output))
 	}
 
-	// TODO @davxy: maybe implement a plain Schnorr signature for Bandersnatch?
-	// This can be discussed depending on the usage of this `sign`
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
 		use ark_ec_vrfs::ietf::Prover;
 		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
@@ -224,7 +255,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let proof = secret.prove(input, output, b"");
 		let signature = IetfVrfSignature { output, proof };
 
-		let mut raw = [0u8; IETF_SIGNATURE_SIZE];
+		let mut raw = [0u8; PLAIN_VRF_SIGNATURE_SIZE];
 		signature
 			.serialize_compressed(raw.as_mut_slice())
 			.map_err(|_| ())?;
@@ -258,7 +289,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let member: Self::InternalMember = Self::internal_member(member);
 		let member_idx = pks.iter().position(|&m| m == member.0).ok_or(())?;
 		let member_idx = member_idx as u32;
-		let prover_key = ring_proof_params().prover_key(&pks[..]);
+		let prover_key = ring_prover_params().prover_key(&pks[..]);
 		Ok((member_idx, prover_key.into()))
 	}
 
@@ -279,7 +310,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> Result<(Self::Proof, Alias), ()> {
 		use ark_ec_vrfs::ring::Prover;
 		let (prover_idx, prover_key) = commitment;
-		let params = ring_proof_params();
+		let params = ring_prover_params();
 		if prover_idx >= params.max_ring_size() as u32 {
 			return Err(());
 		}
@@ -298,7 +329,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			proof,
 		};
 
-		let mut buf = [0u8; RING_SIGNATURE_SIZE];
+		let mut buf = [0u8; RING_VRF_SIGNATURE_SIZE];
 		signature
 			.serialize_compressed(buf.as_mut_slice())
 			.map_err(|_| ())?;
@@ -346,33 +377,76 @@ mod tests {
 
 	type RingBuilderPcsParams = ark_ec_vrfs::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
-	impl BandersnatchVrfVerifiable {
-		fn start_members_from_params() -> (MembersSet, RingBuilderPcsParams) {
-			let (builder, builder_pcs_params) = ring_proof_params().verifier_key_builder();
-			(MembersSet(builder), builder_pcs_params)
-		}
+	fn start_members_from_params() -> (MembersSet, RingBuilderPcsParams) {
+		let (builder, builder_pcs_params) = ring_prover_params().verifier_key_builder();
+		(MembersSet(builder), builder_pcs_params)
 	}
 
+	// This is used to generate parameters.
+	// Run only if there are some breaking changes in the backend crypto and binaries
+	// need to be re-generated.
 	#[test]
-	#[ignore = "empty ring builder"]
+	#[ignore = "ring builder generator"]
 	fn generate_empty_ring_builder() {
 		use std::io::Write;
 		#[cfg(feature = "small-ring")]
-		const EMPTY_RING_COMMITMENT_FILE: &str = concat!(
+		const RING_BUILDER_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-small-ring-builder.bin"
+			"/src/ring-data/zcash-ring-builder-small.bin"
 		);
 		#[cfg(not(feature = "small-ring"))]
-		const EMPTY_RING_COMMITMENT_FILE: &str = concat!(
+		const RING_BUILDER_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-full-ring-builder.bin"
+			"/src/ring-data/zcash-ring-builder-full.bin"
 		);
-		let (builder, _builder_lookup) = BandersnatchVrfVerifiable::start_members_from_params();
+
+		#[cfg(feature = "small-ring")]
+		const RING_BUILDER_PARAMS_FILE: &str = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/src/ring-data/zcash-ring-builder-params-small.bin"
+		);
+		#[cfg(not(feature = "small-ring"))]
+		const RING_BUILDER_PARAMS_FILE: &str = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/src/ring-data/zcash-ring-builder-params-full.bin"
+		);
+
+		let (builder, builder_params) = start_members_from_params();
+
 		let mut buf = Vec::with_capacity(builder.uncompressed_size());
 		builder.serialize_uncompressed(&mut buf).unwrap();
-		println!("Writing empty ring to: {}", EMPTY_RING_COMMITMENT_FILE);
-		let mut file = std::fs::File::create(EMPTY_RING_COMMITMENT_FILE).unwrap(); // Create or truncate the file
+		println!("Writing empty ring builder to: {}", RING_BUILDER_FILE);
+		let mut file = std::fs::File::create(RING_BUILDER_FILE).unwrap(); // Create or truncate the file
 		file.write_all(&buf).unwrap();
+
+		let mut buf = Vec::with_capacity(builder_params.0.uncompressed_size());
+		builder_params.0.serialize_uncompressed(&mut buf).unwrap();
+		println!("G1 len: {}", builder_params.0.len());
+		println!(
+			"Writing ring builder params to: {}",
+			RING_BUILDER_PARAMS_FILE
+		);
+		let mut file = std::fs::File::create(RING_BUILDER_PARAMS_FILE).unwrap(); // Create or truncate the file
+		file.write_all(&buf).unwrap();
+	}
+
+	#[test]
+	fn check_pre_constructed_ring_builder() {
+		let builder = BandersnatchVrfVerifiable::start_members();
+		let builder_params = ring_verifier_builder_params();
+		let (builder2, builder_params2) = start_members_from_params();
+
+		let mut buf1 = vec![];
+		builder_params.0.serialize_uncompressed(&mut buf1).unwrap();
+		let mut buf2 = vec![];
+		builder_params2.0.serialize_uncompressed(&mut buf2).unwrap();
+		assert_eq!(buf1, buf2);
+
+		let mut buf1 = vec![];
+		builder.serialize_uncompressed(&mut buf1).unwrap();
+		let mut buf2 = vec![];
+		builder2.serialize_uncompressed(&mut buf2).unwrap();
+		assert_eq!(buf1, buf2);
 	}
 
 	#[test]
@@ -403,8 +477,8 @@ mod tests {
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
 
 		let mut inter1 = BandersnatchVrfVerifiable::start_members();
-		let (mut inter2, builder_params) = BandersnatchVrfVerifiable::start_members_from_params();
-		assert_eq!(inter1, inter2);
+		let mut inter2 = inter1.clone();
+		let builder_params = ring_verifier_builder_params();
 
 		let get_many = |range| {
 			(&builder_params)
@@ -449,7 +523,7 @@ mod tests {
 		// First set is everyone all at once with the regular starting root.
 		let mut inter1 = BandersnatchVrfVerifiable::start_members();
 		// Second set is everyone all at once but with a starting root constructed from params.
-		let (mut inter2, builder_params) = BandersnatchVrfVerifiable::start_members_from_params();
+		let (mut inter2, builder_params) = start_members_from_params();
 
 		let get_many = |range| {
 			(&builder_params)
@@ -532,7 +606,7 @@ mod tests {
 		let message = b"FooBar";
 
 		let start = Instant::now();
-		let _ = ring_proof_params();
+		let _ = ring_prover_params();
 		println!(
 			"* PCS params decode: {} ms",
 			(Instant::now() - start).as_millis()
@@ -560,7 +634,7 @@ mod tests {
 		println!("  Proof size: {} bytes", proof.encode().len()); // 788 bytes
 
 		// `builder_params` can be serialized/deserialized to be loaded when required
-		let (_, builder_params) = BandersnatchVrfVerifiable::start_members_from_params();
+		let (_, builder_params) = start_members_from_params();
 
 		let get_many = |range| {
 			(&builder_params)
@@ -616,7 +690,7 @@ mod tests {
 		use std::time::Instant;
 
 		let start = Instant::now();
-		let _ = ring_proof_params();
+		let _ = ring_prover_params();
 		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
 
 		let members: Vec<_> = (0..255)
@@ -627,7 +701,7 @@ mod tests {
 			.collect();
 
 		// `builder_params` can be serialized/deserialized to be loaded when required
-		let (_, builder_params) = BandersnatchVrfVerifiable::start_members_from_params();
+		let (_, builder_params) = start_members_from_params();
 
 		let get_many = |range| {
 			(&builder_params)
