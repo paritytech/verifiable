@@ -13,7 +13,7 @@ use scale_info::TypeInfo;
 
 use super::*;
 
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", feature = "no-std-prover"))]
 pub(crate) const PCS_PARAMS_ZCASH: &[u8] =
 	include_bytes!("ring-data/zcash-srs-2-16-uncompressed.bin");
 
@@ -68,12 +68,22 @@ macro_rules! impl_scale {
 	};
 }
 
-/// Get ring proof params for signing operations.
 #[cfg(feature = "std")]
 fn ring_prover_params() -> &'static bandersnatch::RingProofParams {
-	use ark_ec_vrfs::reexports::ark_std::sync::OnceLock;
+	use std::sync::OnceLock;
 	static CELL: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
 	CELL.get_or_init(|| {
+		let pcs_params =
+			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(PCS_PARAMS_ZCASH).unwrap();
+		bandersnatch::RingProofParams::from_pcs_params(MAX_RING_SIZE, pcs_params).unwrap()
+	})
+}
+
+#[cfg(all(not(feature = "std"), feature = "no-std-prover"))]
+fn ring_prover_params() -> &'static bandersnatch::RingProofParams {
+	use spin::Once;
+	static CELL: Once<bandersnatch::RingProofParams> = Once::new();
+	CELL.call_once(|| {
 		let pcs_params =
 			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(PCS_PARAMS_ZCASH).unwrap();
 		bandersnatch::RingProofParams::from_pcs_params(MAX_RING_SIZE, pcs_params).unwrap()
@@ -278,7 +288,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			.is_ok()
 	}
 
-	#[cfg(feature = "std")]
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn open(
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
@@ -293,15 +303,15 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Ok((member_idx, prover_key.into()))
 	}
 
-	#[cfg(not(feature = "std"))]
+	#[cfg(not(any(feature = "std", feature = "no-std-prover")))]
 	fn open(
 		_member: &Self::Member,
 		_members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
-		panic!("Not implemented")
+		panic!("not implemented: requires `std` or `no-std-prover`")
 	}
 
-	#[cfg(feature = "std")]
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn create(
 		commitment: Self::Commitment,
 		secret: &Self::Secret,
@@ -337,14 +347,14 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Ok((buf, alias))
 	}
 
-	#[cfg(not(feature = "std"))]
+	#[cfg(not(any(feature = "std", feature = "no-std-prover")))]
 	fn create(
 		_commitment: Self::Commitment,
 		_secret: &Self::Secret,
 		_context: &[u8],
 		_message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
-		panic!("Not implemented")
+		panic!("not implemented: requires `std` or `no-std-prover`")
 	}
 
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
