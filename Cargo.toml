@@ -14,6 +14,7 @@ schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_ba
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
 ark-ec-vrfs = { version = "0.1.2", default-features = false, features = ["bandersnatch", "ring"] }
+spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
 
 [dev-dependencies]
 rand_core = "0.6"
@@ -30,8 +31,11 @@ std = [
   "ark-ec-vrfs/std",
   "ark-ec-vrfs/parallel"
 ]
-# Small (2^9) zcash params (defaults to 2^16)
-# Mostly useful for testing
+# Small ring 255, default to 16127
 small-ring = []
-# Deterministic ring-proof (NOT-FOR-PRODUCTION)
-test-vectors = [ "ark-ec-vrfs/test-vectors" ]
+# Prover for no-std environments with deterministic ring-proof.
+# Not for production, may be useful for testing.
+no-std-prover = [
+  "spin",
+  "ark-ec-vrfs/test-vectors",
+]
