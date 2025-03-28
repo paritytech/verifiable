@@ -1,14 +1,14 @@
 use alloc::vec;
 use core::ops::Range;
 
-pub use ark_ec_vrfs;
+pub use ark_vrf;
 
-use ark_ec_vrfs::{
+use ark_scale::ArkScale;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_vrf::{
 	ring::Verifier,
 	suites::bandersnatch::{self, BandersnatchSha512Ell2},
 };
-use ark_scale::ArkScale;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use scale_info::TypeInfo;
 
 use super::*;
@@ -19,7 +19,7 @@ pub(crate) const PCS_PARAMS_ZCASH: &[u8] =
 
 /// The max ring that can be handled for both sign/verify for the given PCS domain size.
 const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
-	ark_ec_vrfs::ring::max_ring_size_from_pcs_domain_size::<bandersnatch::BandersnatchSha512Ell2>(
+	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<bandersnatch::BandersnatchSha512Ell2>(
 		pcs_domain_size,
 	)
 }
@@ -47,7 +47,7 @@ use ring_params::*;
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
 
 /// A sequence of static chunks.
-pub type RingBuilderParams = ark_ec_vrfs::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
+pub type RingBuilderParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
 macro_rules! impl_scale {
 	($type_name:ident, $encoded_size:expr) => {
@@ -92,12 +92,12 @@ fn ring_prover_params() -> &'static bandersnatch::RingProofParams {
 
 /// Get ring builder params.
 pub fn ring_verifier_builder_params() -> RingBuilderParams {
-	use ark_ec_vrfs::ring::G1Affine;
+	use ark_vrf::ring::G1Affine;
 	let inner = <Vec<G1Affine<BandersnatchSha512Ell2>>>::deserialize_uncompressed_unchecked(
 		RING_BUILDER_PARAMS,
 	)
 	.unwrap();
-	ark_ec_vrfs::ring::RingBuilderPcsParams::<BandersnatchSha512Ell2>(inner)
+	ark_vrf::ring::RingBuilderPcsParams::<BandersnatchSha512Ell2>(inner)
 }
 
 #[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
@@ -149,7 +149,7 @@ pub struct PublicKey(bandersnatch::AffinePoint);
 impl_scale!(PublicKey, PUBLIC_KEY_SIZE);
 
 #[derive(Clone, Eq, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StaticChunk(pub ark_ec_vrfs::ring::G1Affine<bandersnatch::BandersnatchSha512Ell2>);
+pub struct StaticChunk(pub ark_vrf::ring::G1Affine<bandersnatch::BandersnatchSha512Ell2>);
 impl_scale!(StaticChunk, 48);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
@@ -257,7 +257,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
-		use ark_ec_vrfs::ietf::Prover;
+		use ark_vrf::ietf::Prover;
 		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
 		let output = secret.output(input);
@@ -277,7 +277,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		message: &[u8],
 		member: &Self::Member,
 	) -> bool {
-		use ark_ec_vrfs::ietf::Verifier;
+		use ark_vrf::ietf::Verifier;
 		let signature = IetfVrfSignature::deserialize_compressed(signature.as_slice()).unwrap();
 		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
@@ -318,7 +318,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
-		use ark_ec_vrfs::ring::Prover;
+		use ark_vrf::ring::Prover;
 		let (prover_idx, prover_key) = commitment;
 		let params = ring_prover_params();
 		if prover_idx >= params.max_ring_size() as u32 {
@@ -383,9 +383,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use ark_ec_vrfs::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
+	use ark_vrf::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
 
-	type RingBuilderPcsParams = ark_ec_vrfs::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
+	type RingBuilderPcsParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
 	fn start_members_from_params() -> (MembersSet, RingBuilderPcsParams) {
 		let (builder, builder_pcs_params) = ring_prover_params().verifier_key_builder();

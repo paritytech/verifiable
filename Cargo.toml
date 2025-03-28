@@ -13,7 +13,7 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-ark-ec-vrfs = { version = "0.1.2", default-features = false, features = ["bandersnatch", "ring"] }
+ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
 
 [dev-dependencies]
@@ -28,8 +28,8 @@ std = [
   "schnorrkel/std",
   "ark-serialize/std",
   "ark-scale/std",
-  "ark-ec-vrfs/std",
-  "ark-ec-vrfs/parallel"
+  "ark-vrf/std",
+  "ark-vrf/parallel"
 ]
 # Small ring 255, default to 16127
 small-ring = []
@@ -37,5 +37,5 @@ small-ring = []
 # Not for production, may be useful for testing.
 no-std-prover = [
   "spin",
-  "ark-ec-vrfs/test-vectors",
+  "ark-vrf/test-vectors",
 ]
