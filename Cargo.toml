@@ -2,6 +2,10 @@
 name = "verifiable"
 version = "0.1.0"
 edition = "2021"
+description = "Interface for cryptographic proof of membership of a set with known members"
+authors = ["Parity Technologies <admin@parity.io>"]
+repository = "https://github.com/paritytech/verifiable.git"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
