@@ -14,8 +14,7 @@ use scale_info::TypeInfo;
 use super::*;
 
 #[cfg(any(feature = "std", feature = "no-std-prover"))]
-pub(crate) const PCS_PARAMS_ZCASH: &[u8] =
-	include_bytes!("ring-data/zcash-srs-2-16-uncompressed.bin");
+pub(crate) const VERIFIABLE_SRS_RAW: &[u8] = include_bytes!("ring-data/srs-uncompressed.bin");
 
 /// The max ring that can be handled for both sign/verify for the given PCS domain size.
 const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
@@ -31,7 +30,7 @@ mod ring_params {
 	pub const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 11);
 	/// Ring parameters file
 	pub const RING_BUILDER_PARAMS: &[u8] =
-		include_bytes!("ring-data/zcash-ring-builder-params-small.bin");
+		include_bytes!("ring-data/ring-builder-params-small.bin");
 }
 #[cfg(not(feature = "small-ring"))]
 mod ring_params {
@@ -39,8 +38,7 @@ mod ring_params {
 	/// 16127
 	pub const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 16);
 	/// Ring parameters file
-	pub const RING_BUILDER_PARAMS: &[u8] =
-		include_bytes!("ring-data/zcash-ring-builder-params-full.bin");
+	pub const RING_BUILDER_PARAMS: &[u8] = include_bytes!("ring-data/ring-builder-params-full.bin");
 }
 use ring_params::*;
 
@@ -74,7 +72,8 @@ fn ring_prover_params() -> &'static bandersnatch::RingProofParams {
 	static CELL: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
 	CELL.get_or_init(|| {
 		let pcs_params =
-			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(PCS_PARAMS_ZCASH).unwrap();
+			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(VERIFIABLE_SRS_RAW)
+				.unwrap();
 		bandersnatch::RingProofParams::from_pcs_params(MAX_RING_SIZE, pcs_params).unwrap()
 	})
 }
@@ -85,7 +84,8 @@ fn ring_prover_params() -> &'static bandersnatch::RingProofParams {
 	static CELL: Once<bandersnatch::RingProofParams> = Once::new();
 	CELL.call_once(|| {
 		let pcs_params =
-			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(PCS_PARAMS_ZCASH).unwrap();
+			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(VERIFIABLE_SRS_RAW)
+				.unwrap();
 		bandersnatch::RingProofParams::from_pcs_params(MAX_RING_SIZE, pcs_params).unwrap()
 	})
 }
@@ -187,10 +187,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	fn start_members() -> Self::Intermediate {
 		#[cfg(feature = "small-ring")]
 		const EMPTY_RING_COMMITMENT_DATA: &[u8] =
-			include_bytes!("ring-data/zcash-ring-builder-small.bin");
+			include_bytes!("ring-data/ring-builder-small.bin");
 		#[cfg(not(feature = "small-ring"))]
-		const EMPTY_RING_COMMITMENT_DATA: &[u8] =
-			include_bytes!("ring-data/zcash-ring-builder-full.bin");
+		const EMPTY_RING_COMMITMENT_DATA: &[u8] = include_bytes!("ring-data/ring-builder-full.bin");
 		MembersSet::deserialize_uncompressed_unchecked(EMPTY_RING_COMMITMENT_DATA).unwrap()
 	}
 
@@ -392,6 +391,45 @@ mod tests {
 		(MembersSet(builder), builder_pcs_params)
 	}
 
+	#[test]
+	#[ignore = "srs generator"]
+	fn generate_srs_from_full_zcash_srs() {
+		use std::fs::File;
+		use std::io::{Read, Write};
+
+		const FULL_ZCASH_SRS_FILE: &str = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/src/ring-data/zcash-srs-2-16-uncompressed.bin"
+		);
+		const SRS_COMPRESSED_FILE: &str = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/src/ring-data/srs-compressed.bin"
+		);
+		const SRS_UNCOMPRESSED_FILE: &str = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/src/ring-data/srs-uncompressed.bin"
+		);
+
+		let mut buf = vec![];
+		let mut file = File::open(FULL_ZCASH_SRS_FILE).unwrap();
+		file.read_to_end(&mut buf).unwrap();
+		println!("Full size: {}", buf.len());
+
+		let full_params = ring_prover_params();
+
+		let mut buf = vec![];
+		full_params.serialize_compressed(&mut buf).unwrap();
+		println!("Reduced size (compressed): {}", buf.len());
+		let mut file = File::create(SRS_COMPRESSED_FILE).unwrap();
+		file.write_all(&buf).unwrap();
+
+		let mut buf = vec![];
+		full_params.serialize_uncompressed(&mut buf).unwrap();
+		println!("Reduced size (uncompressed): {}", buf.len());
+		let mut file = File::create(SRS_UNCOMPRESSED_FILE).unwrap();
+		file.write_all(&buf).unwrap();
+	}
+
 	// This is used to generate parameters.
 	// Run only if there are some breaking changes in the backend crypto and binaries
 	// need to be re-generated.
@@ -402,23 +440,23 @@ mod tests {
 		#[cfg(feature = "small-ring")]
 		const RING_BUILDER_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-ring-builder-small.bin"
+			"/src/ring-data/ring-builder-small.bin"
 		);
 		#[cfg(not(feature = "small-ring"))]
 		const RING_BUILDER_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-ring-builder-full.bin"
+			"/src/ring-data/ring-builder-full.bin"
 		);
 
 		#[cfg(feature = "small-ring")]
 		const RING_BUILDER_PARAMS_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-ring-builder-params-small.bin"
+			"/src/ring-data/ring-builder-params-small.bin"
 		);
 		#[cfg(not(feature = "small-ring"))]
 		const RING_BUILDER_PARAMS_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-ring-builder-params-full.bin"
+			"/src/ring-data/ring-builder-params-full.bin"
 		);
 
 		let (builder, builder_params) = start_members_from_params();
