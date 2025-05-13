@@ -12,6 +12,7 @@ pub struct Trivial;
 impl GenerateVerifiable for Trivial {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
+	type InternalMember = [u8; 32];
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
@@ -23,12 +24,15 @@ impl GenerateVerifiable for Trivial {
 		BoundedVec::new()
 	}
 
-	fn push_member(
+	fn push_members(
 		inter: &mut Self::Intermediate,
-		who: Self::Member,
-		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+		members: impl Iterator<Item = Self::Member>,
+		_lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()> {
-		inter.try_push(who).map_err(|_| ())
+		for member in members {
+			inter.try_push(member).map_err(|_| ())?
+		}
+		Ok(())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
@@ -77,33 +81,63 @@ impl GenerateVerifiable for Trivial {
 			Err(())
 		}
 	}
+
+	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
+		Ok(secret.clone())
+	}
+
+	fn external_member(value: &Self::InternalMember) -> Self::Member {
+		value.clone()
+	}
+
+	fn internal_member(value: &Self::Member) -> Self::InternalMember {
+		value.clone()
+	}
+
+	fn sign(secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
+		Ok(secret.clone())
+	}
+
+	fn verify_signature(
+		signature: &Self::Signature,
+		_message: &[u8],
+		member: &Self::Member,
+	) -> bool {
+		signature == member
+	}
 }
 
 const SIG_CON: &[u8] = b"verifiable";
 
 /// Example impl of `Verifiable` which uses Schnorrkel. This doesn't anonymise anything.
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen)]
+#[derive(
+	Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking,
+)]
 pub struct Simple;
 impl GenerateVerifiable for Simple {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
+	type InternalMember = [u8; 32];
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
-	type Signature = [u8; 32];
+	type Signature = [u8; 64];
 	type StaticChunk = ();
 
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
 	}
 
-	fn push_member(
+	fn push_members(
 		inter: &mut Self::Intermediate,
-		who: Self::Member,
-		_lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+		members: impl Iterator<Item = Self::Member>,
+		_lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()> {
-		inter.try_push(who).map_err(|_| ())
+		for member in members {
+			inter.try_push(member).map_err(|_| ())?
+		}
+		Ok(())
 	}
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
@@ -166,6 +200,37 @@ impl GenerateVerifiable for Simple {
 				.map_err(|_| ())
 		})
 	}
+
+	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
+		Ok(Self::member_from_secret(&secret))
+	}
+
+	fn external_member(value: &Self::InternalMember) -> Self::Member {
+		value.clone()
+	}
+
+	fn internal_member(value: &Self::Member) -> Self::InternalMember {
+		value.clone()
+	}
+
+	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
+		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
+		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
+
+		let sig = ("no-ctxt", message)
+			.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
+
+		Ok(sig)
+	}
+	fn verify_signature(
+		signature: &Self::Signature,
+		message: &[u8],
+		member: &Self::Member,
+	) -> bool {
+		let p = PublicKey::from_bytes(&member[..]).unwrap();
+		let s = schnorrkel::Signature::from_bytes(&signature[..]).unwrap();
+		("no-ctxt", message).using_encoded(|b| p.verify_simple(SIG_CON, b, &s).is_ok())
+	}
 }
 
 #[cfg(test)]
@@ -181,8 +246,16 @@ mod tests {
 		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
 		let mut inter = <Simple as GenerateVerifiable>::start_members();
-		<Simple as GenerateVerifiable>::push_member(&mut inter, alice.clone(), |_| Ok(())).unwrap();
-		<Simple as GenerateVerifiable>::push_member(&mut inter, bob.clone(), |_| Ok(())).unwrap();
+		<Simple as GenerateVerifiable>::push_members(
+			&mut inter,
+			[alice.clone()].into_iter(),
+			|_| Ok(vec![()]),
+		)
+		.unwrap();
+		<Simple as GenerateVerifiable>::push_members(&mut inter, [bob.clone()].into_iter(), |_| {
+			Ok(vec![()])
+		})
+		.unwrap();
 		let members = <Simple as GenerateVerifiable>::finish_members(inter);
 
 		type SimpleReceipt = Receipt<Simple>;
@@ -245,5 +318,50 @@ mod tests {
 			p.verify_simple(SIG_CON, &message[..], &s).is_ok()
 		};
 		assert!(!ok);
+	}
+
+	#[test]
+	fn trivial_signature_works() {
+		let secret = [0; 32];
+		let member = <Trivial as GenerateVerifiable>::member_from_secret(&secret);
+		let signature = <Trivial as GenerateVerifiable>::sign(&secret, b"Hello world").unwrap();
+		assert!(<Trivial as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"Hello world",
+			&member
+		));
+	}
+
+	#[test]
+	fn simple_signature_works() {
+		let secret = [0; 32];
+		let member = <Simple as GenerateVerifiable>::member_from_secret(&secret);
+		let signature = <Simple as GenerateVerifiable>::sign(&secret, b"Hello world").unwrap();
+
+		let another_secrect = [1; 32];
+		let another_member = <Simple as GenerateVerifiable>::member_from_secret(&another_secrect);
+		let another_signature =
+			<Simple as GenerateVerifiable>::sign(&another_secrect, b"Hello world").unwrap();
+
+		assert!(<Simple as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"Hello world",
+			&member
+		));
+		assert!(!<Simple as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"Hello world",
+			&another_member
+		));
+		assert!(!<Simple as GenerateVerifiable>::verify_signature(
+			&signature,
+			b"No hello",
+			&member
+		));
+		assert!(!<Simple as GenerateVerifiable>::verify_signature(
+			&another_signature,
+			b"Hello world",
+			&member
+		));
 	}
 }

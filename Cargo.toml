@@ -2,29 +2,28 @@
 name = "verifiable"
 version = "0.1.0"
 edition = "2021"
+description = "Interface for cryptographic proof of membership of a set with known members"
+authors = ["Parity Technologies <admin@parity.io>"]
+repository = "https://github.com/paritytech/verifiable.git"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
+
+exclude = ["src/ring-data/zcash-srs-2-16-uncompressed.bin"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[lib]
-crate-type = ["cdylib"]
 
 [dependencies]
 derive-where = "1.2"
 bounded-collections = { version = "0.1.8", default-features = false }
-parity-scale-codec = { version = "3.6.1", default-features = false, features = ["derive","max-encoded-len"] }
-scale-info = { version = "2.7.0", default-features = false, features = ["derive"] }
+parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
+scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
-ark-serialize = { version = "0.4", default-features = false, features = ["derive"] }
-ark-scale = { version = "0.0.12", default-features = false }
-bandersnatch_vrfs = { git = "https://github.com/w3f/ring-vrf.git", branch = "real-srs", default-features = false}
-getrandom = { version = "0.2.11", features = ["js"] }
-wasm-bindgen = "0.2.90"
-js-sys = "0.3.66"
-
+ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
+ark-scale = { version = "0.0.13", default-features = false }
+ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
+spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
 
 [dev-dependencies]
 rand_core = "0.6"
-wasm-bindgen-test = "0.3.40"
 
 [features]
 default = [ "std" ]
@@ -35,14 +34,14 @@ std = [
   "schnorrkel/std",
   "ark-serialize/std",
   "ark-scale/std",
-  "bandersnatch_vrfs/std",
+  "ark-vrf/std",
+  "ark-vrf/parallel"
 ]
-# Small (2^9) zcash params (defaults to 2^16)
-# Mostly useful for testing
+# Small ring 255, default to 16127
 small-ring = []
-
-[profile.test]
-opt-level = 3               # Use slightly better optimizations.
-
-[profile.release]
-lto = true
+# Prover for no-std environments with deterministic ring-proof.
+# Not for production, may be useful for testing.
+no-std-prover = [
+  "spin",
+  "ark-vrf/test-vectors",
+]

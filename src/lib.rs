@@ -5,8 +5,8 @@ extern crate core;
 
 use alloc::vec::Vec;
 
-use core::fmt::Debug;
-use parity_scale_codec::{Decode, Encode, FullCodec, MaxEncodedLen};
+use core::{fmt::Debug, ops::Range};
+use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
 pub mod demo_impls;
@@ -50,10 +50,14 @@ pub trait GenerateVerifiable {
 	///
 	/// This is envisioned to be stored on-chain.
 	type Intermediate: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
-	/// Value identifying a single member. Corresponds to the Public Key.
+	/// Encoded value identifying a single member. Corresponds to the user representation of a Public Key.
 	///
-	/// This is stored on-chain and also expected to be passed on-chain as a parameter.
+	/// This is expected to be passed on-chain as an encoded version of `InternalMember`.
 	type Member: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
+	/// Value identifying a single member. Corresponds to the internal representation of a Public Key.
+	///
+	/// This is stored on-chain.
+	type InternalMember: Clone + Eq + PartialEq + FullCodec + Debug + MaxEncodedLen;
 	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
 	///
 	/// This is not envisioned to be used on-chain.
@@ -76,13 +80,17 @@ pub trait GenerateVerifiable {
 	/// Begin building a `Members` value.
 	fn start_members() -> Self::Intermediate;
 
-	/// Introduce a new `Member` into the intermediate value used to build a new `Members` value.
-	fn push_member(
+	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
+	/// value.
+	///
+	/// An error is returned if at least one member failed to be pushed. This can happen if the
+	/// maximum capacity has already been reached or the member is already part of the set.
+	fn push_members(
 		intermediate: &mut Self::Intermediate,
-		who: Self::Member,
-		lookup: impl Fn(usize) -> Result<Self::StaticChunk, ()>,
+		members: impl Iterator<Item = Self::Member>,
+		lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()>;
-	// push_members
+
 	/// Consume the `intermediate` value to create a new `Members` value.
 	fn finish_members(inter: Self::Intermediate) -> Self::Members;
 
@@ -147,6 +155,9 @@ pub trait GenerateVerifiable {
 		}
 	}
 
+	/// Generate the alias a `secret` would have in a given `context`.
+	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()>;
+
 	/// Like `is_valid`, but `alias` is returned, not provided.
 	fn validate(
 		_proof: &Self::Proof,
@@ -164,10 +175,16 @@ pub trait GenerateVerifiable {
 	) -> bool {
 		false
 	}
+
+	/// Convert a member value from internal to external representation.
+	fn external_member(value: &Self::InternalMember) -> Self::Member;
+
+	/// Convert a member value from external to internal representation.
+	fn internal_member(value: &Self::Member) -> Self::InternalMember;
 }
 
 // This is just a convenience struct to help manage some of the witness data. No need to look at it.
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
+#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, DecodeWithMemTracking)]
 pub struct Receipt<Gen: GenerateVerifiable> {
 	proof: Gen::Proof,
 	alias: Alias,
