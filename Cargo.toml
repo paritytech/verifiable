@@ -21,9 +21,13 @@ ark-serialize = { version = "0.5", default-features = false, features = ["derive
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
+getrandom = { version = "0.2.11", features = ["js"] }
+wasm-bindgen = "0.2.90"
+js-sys = "0.3.66"
 
 [dev-dependencies]
 rand_core = "0.6"
+wasm-bindgen-test = "0.3.40"
 
 [features]
 default = [ "std" ]
@@ -45,3 +49,6 @@ no-std-prover = [
   "spin",
   "ark-vrf/test-vectors",
 ]
+
+[lib]
+crate-type = ["cdylib", "rlib"]

@@ -1,17 +1,10 @@
-use crate::ring_vrf_impl::BandersnatchVrfVerifiable;
+use crate::ring_vrf_impl::{ring_verifier_builder_params, BandersnatchVrfVerifiable, StaticChunk};
 use crate::{Entropy, GenerateVerifiable};
-use ark_scale::ArkScale;
-use ark_serialize::CanonicalDeserialize;
-use bandersnatch_vrfs::ring::StaticVerifierKey;
+use ark_vrf::ring::SrsLookup;
 use bounded_collections::{BoundedVec, ConstU32};
 use js_sys::{Boolean, JsString, Object, Uint8Array};
 use parity_scale_codec::{Decode, Encode};
 use wasm_bindgen::prelude::*;
-
-#[cfg(feature = "small-ring")]
-const ONCHAIN_VK: &[u8] = include_bytes!("ring-data/zcash-9.vk");
-#[cfg(not(feature = "small-ring"))]
-const ONCHAIN_VK: &[u8] = include_bytes!("ring-data/zcash-16.vk");
 
 #[wasm_bindgen]
 pub fn one_shot(
@@ -90,14 +83,22 @@ pub fn validate(
 		ConstU32<{ u32::MAX }>,
 	> = Decode::decode(&mut &members[..]).unwrap();
 
-	// TODO ok as validation is only happening on chain right? Otherwise expose vk?
-	let vk = StaticVerifierKey::deserialize_uncompressed_unchecked(ONCHAIN_VK).unwrap();
-	let get_one = |i| Ok(ArkScale(vk.lag_g1[i]));
+	// Get the builder params for verification
+	let builder_params = ring_verifier_builder_params();
+	let get_many = |range| {
+		(&builder_params)
+			.lookup(range)
+			.map(|v| v.into_iter().map(|i| StaticChunk(i)).collect::<Vec<_>>())
+			.ok_or(())
+	};
 
+	// Start with empty members set
 	let mut inter = BandersnatchVrfVerifiable::start_members();
-	members.iter().for_each(|member| {
-		BandersnatchVrfVerifiable::push_member(&mut inter, member.clone(), get_one).unwrap();
-	});
+
+	// Add all members at once
+	BandersnatchVrfVerifiable::push_members(&mut inter, members.into_iter(), get_many).unwrap();
+
+	// Finish building the members commitment
 	let members_commitment = BandersnatchVrfVerifiable::finish_members(inter);
 
 	let context = &context.to_vec()[..];
@@ -218,8 +219,8 @@ mod tests {
 		let js_member = member_from_entropy(Uint8Array::from(&entropy[..]));
 
 		assert_eq!(rust_member.encode().len(), js_member.to_vec().len());
-		assert_eq!(rust_member.encode().len(), 33);
-		assert_eq!(js_member.to_vec().len(), 33);
+		assert_eq!(rust_member.encode().len(), 32);
+		assert_eq!(js_member.to_vec().len(), 32);
 		assert_eq!(rust_member.encode(), js_member.to_vec());
 	}
 
