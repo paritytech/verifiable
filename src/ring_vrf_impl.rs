@@ -195,7 +195,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Members = MembersCommitment;
 	type Intermediate = MembersSet;
 	type Member = EncodedPublicKey;
-	type InternalMember = EncodedPublicKey;
 	type Secret = bandersnatch::Secret;
 	type Commitment = (u32, ArkScale<bandersnatch::RingProverKey>);
 	type Proof = [u8; RING_VRF_SIGNATURE_SIZE];
@@ -384,14 +383,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let output = secret.output(input);
 		let alias = make_alias(&output);
 		Ok(alias)
-	}
-
-	fn external_member(value: &Self::InternalMember) -> Self::Member {
-		value.clone()
-	}
-
-	fn internal_member(value: &Self::Member) -> Self::InternalMember {
-		value.clone()
 	}
 }
 
