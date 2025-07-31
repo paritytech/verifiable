@@ -1,6 +1,6 @@
 [package]
 name = "verifiable"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Interface for cryptographic proof of membership of a set with known members"
 authors = ["Parity Technologies <admin@parity.io>"]
