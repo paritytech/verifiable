@@ -384,6 +384,10 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let alias = make_alias(&output);
 		Ok(alias)
 	}
+
+	fn is_member_valid(member: &Self::Member) -> bool {
+		Self::to_public_key(member).is_ok()
+	}
 }
 
 #[cfg(test)]
@@ -793,5 +797,18 @@ mod tests {
 		);
 
 		assert_eq!(inter1, inter2);
+	}
+
+	#[test]
+	fn test_is_member_valid_invalid() {
+		let invalid_member = EncodedPublicKey([0; 32]);
+		assert!(!BandersnatchVrfVerifiable::is_member_valid(&invalid_member));
+	}
+
+	#[test]
+	fn test_is_member_valid_valid() {
+		let secret = BandersnatchVrfVerifiable::new_secret([42u8; 32]);
+		let valid_member = BandersnatchVrfVerifiable::member_from_secret(&secret);
+		assert!(BandersnatchVrfVerifiable::is_member_valid(&valid_member));
 	}
 }
