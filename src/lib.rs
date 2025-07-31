@@ -76,8 +76,12 @@ pub trait GenerateVerifiable {
 	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
 	/// value.
 	///
-	/// An error is returned if at least one member failed to be pushed. This can happen if the
-	/// maximum capacity has already been reached or the member is already part of the set.
+	/// An error is returned if at least one member failed to be pushed. This happens in those
+	/// situations:
+	/// * the maximum capacity has already been reached
+	/// * the member is already part of the set
+	/// * the member is invalid (can be checked with `is_member_valid`)
+	/// * the lookup function is invalid
 	fn push_members(
 		intermediate: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
@@ -103,6 +107,9 @@ pub trait GenerateVerifiable {
 	/// `Secret` for `member` and as such is practical to conduct on an offline/air-gapped device.
 	///
 	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
+	///
+	/// **WARNING**: This function may panic if called from on-chain or an environment not
+	/// implementing the functionality.
 	fn open(
 		member: &Self::Member,
 		members_iter: impl Iterator<Item = Self::Member>,
@@ -120,6 +127,9 @@ pub trait GenerateVerifiable {
 	/// are unlinkable.
 	///
 	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
+	///
+	/// **WARNING**: This function may panic if called from on-chain or an environment not
+	/// implementing the functionality.
 	fn create(
 		commitment: Self::Commitment,
 		secret: &Self::Secret,
@@ -168,6 +178,8 @@ pub trait GenerateVerifiable {
 	) -> bool {
 		false
 	}
+
+	fn is_member_valid(_member: &Self::Member) -> bool;
 }
 
 // This is just a convenience struct to help manage some of the witness data. No need to look at it.
