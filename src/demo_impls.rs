@@ -12,7 +12,6 @@ pub struct Trivial;
 impl GenerateVerifiable for Trivial {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
-	type InternalMember = [u8; 32];
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
@@ -86,14 +85,6 @@ impl GenerateVerifiable for Trivial {
 		Ok(secret.clone())
 	}
 
-	fn external_member(value: &Self::InternalMember) -> Self::Member {
-		value.clone()
-	}
-
-	fn internal_member(value: &Self::Member) -> Self::InternalMember {
-		value.clone()
-	}
-
 	fn sign(secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
 		Ok(secret.clone())
 	}
@@ -117,7 +108,6 @@ pub struct Simple;
 impl GenerateVerifiable for Simple {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
-	type InternalMember = [u8; 32];
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
@@ -203,14 +193,6 @@ impl GenerateVerifiable for Simple {
 
 	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
 		Ok(Self::member_from_secret(&secret))
-	}
-
-	fn external_member(value: &Self::InternalMember) -> Self::Member {
-		value.clone()
-	}
-
-	fn internal_member(value: &Self::Member) -> Self::InternalMember {
-		value.clone()
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {

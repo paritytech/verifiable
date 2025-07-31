@@ -173,11 +173,28 @@ fn make_alias(output: &bandersnatch::Output) -> Alias {
 
 pub struct BandersnatchVrfVerifiable;
 
+impl BandersnatchVrfVerifiable {
+	fn to_public_key(
+		value: &EncodedPublicKey,
+	) -> Result<PublicKey, ()> {
+		let pt =
+			bandersnatch::AffinePoint::deserialize_compressed(&value.0[..]).map_err(|_| ())?;
+		Ok(PublicKey(pt.into()))
+	}
+
+	fn to_encoded_public_key(value: &PublicKey) -> EncodedPublicKey {
+		let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+		value.using_encoded(|encoded| {
+			bytes.copy_from_slice(encoded);
+		});
+		EncodedPublicKey(bytes)
+	}
+}
+
 impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Members = MembersCommitment;
 	type Intermediate = MembersSet;
 	type Member = EncodedPublicKey;
-	type InternalMember = PublicKey;
 	type Secret = bandersnatch::Secret;
 	type Commitment = (u32, ArkScale<bandersnatch::RingProverKey>);
 	type Proof = [u8; RING_VRF_SIGNATURE_SIZE];
@@ -200,7 +217,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> Result<(), ()> {
 		let mut keys = vec![];
 		for member in members {
-			keys.push(Self::internal_member(&member).0);
+			keys.push(Self::to_public_key(&member)?.0);
 		}
 		let loader = |range: Range<usize>| {
 			let items = lookup(range)
@@ -223,7 +240,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	}
 
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
-		Self::external_member(&PublicKey(secret.public().0))
+		Self::to_encoded_public_key(&PublicKey(secret.public().0))
 	}
 
 	fn validate(
@@ -277,10 +294,14 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		member: &Self::Member,
 	) -> bool {
 		use ark_vrf::ietf::Verifier;
-		let signature = IetfVrfSignature::deserialize_compressed(signature.as_slice()).unwrap();
+		let Ok(signature) = IetfVrfSignature::deserialize_compressed(signature.as_slice()) else {
+			return false;
+		};
 		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
-		let member = Self::internal_member(member);
+		let Ok(member) = Self::to_public_key(member) else {
+			return false;
+		};
 		let public = bandersnatch::Public::from(member.0);
 		public
 			.verify(input, signature.output, b"", &signature.proof)
@@ -293,9 +314,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
 		let pks = members
-			.map(|m| Self::internal_member(&m).0)
-			.collect::<Vec<_>>();
-		let member: Self::InternalMember = Self::internal_member(member);
+			.map(|m| Self::to_public_key(&m).map(|pk| pk.0))
+			.collect::<Result<Vec<_>, _>>()?;
+		let member = Self::to_public_key(member)?;
 		let member_idx = pks.iter().position(|&m| m == member.0).ok_or(())?;
 		let member_idx = member_idx as u32;
 		let prover_key = ring_prover_params().prover_key(&pks[..]);
@@ -362,20 +383,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let output = secret.output(input);
 		let alias = make_alias(&output);
 		Ok(alias)
-	}
-
-	fn external_member(value: &Self::InternalMember) -> Self::Member {
-		let mut bytes = [0u8; PUBLIC_KEY_SIZE];
-		value.using_encoded(|encoded| {
-			bytes.copy_from_slice(encoded);
-		});
-		EncodedPublicKey(bytes)
-	}
-
-	fn internal_member(value: &Self::Member) -> Self::InternalMember {
-		let pt =
-			bandersnatch::AffinePoint::deserialize_compressed(&value.0[..]).expect("must be valid");
-		PublicKey(pt.into())
 	}
 }
 
@@ -501,7 +508,7 @@ mod tests {
 	fn check_precomputed_size() {
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let internal = BandersnatchVrfVerifiable::internal_member(&public);
+		let internal = BandersnatchVrfVerifiable::to_public_key(&public).unwrap();
 		assert_eq!(internal.compressed_size(), PublicKey::max_encoded_len());
 
 		let members = BandersnatchVrfVerifiable::start_members();
