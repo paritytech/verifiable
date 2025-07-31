@@ -19,6 +19,10 @@ impl GenerateVerifiable for Trivial {
 	type Signature = [u8; 32];
 	type StaticChunk = ();
 
+	fn is_member_valid(_member: &Self::Member) -> bool {
+		true
+	}
+
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
 	}
@@ -114,6 +118,10 @@ impl GenerateVerifiable for Simple {
 	type Proof = ([u8; 64], Alias);
 	type Signature = [u8; 64];
 	type StaticChunk = ();
+
+	fn is_member_valid(_member: &Self::Member) -> bool {
+		true
+	}
 
 	fn start_members() -> Self::Intermediate {
 		BoundedVec::new()
