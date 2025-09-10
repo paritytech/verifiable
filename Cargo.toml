@@ -21,27 +21,32 @@ ark-serialize = { version = "0.5", default-features = false, features = ["derive
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
+rand = { version = "0.8", features = ["getrandom"] }
 
 [dev-dependencies]
 rand_core = "0.6"
 
+[[bin]]
+name = "generate_test_keys"
+path = "src/bin/generate_test_keys.rs"
+
 [features]
-default = [ "std" ]
+default = ["std"]
 std = [
-  "bounded-collections/std",
-  "parity-scale-codec/std",
-  "scale-info/std",
-  "schnorrkel/std",
-  "ark-serialize/std",
-  "ark-scale/std",
-  "ark-vrf/std",
-  "ark-vrf/parallel"
+    "bounded-collections/std",
+    "parity-scale-codec/std",
+    "scale-info/std",
+    "schnorrkel/std",
+    "ark-serialize/std",
+    "ark-scale/std",
+    "ark-vrf/std",
+    "ark-vrf/parallel"
 ]
 # Small ring 255, default to 16127
 small-ring = []
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
-  "spin",
-  "ark-vrf/test-vectors",
+    "spin",
+    "ark-vrf/test-vectors",
 ]
