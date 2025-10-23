@@ -16,19 +16,19 @@ derive-where = "1.2"
 bounded-collections = { version = "0.1.8", default-features = false }
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
-schnorrkel = { version = "0.11.5", default-features = false}
+schnorrkel = { version = "0.11.5", default-features = false }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
-rand = { version = "0.8", features = ["getrandom"] }
 
 [dev-dependencies]
+rand = { version = "0.8", features = ["getrandom"] }
 rand_core = "0.6"
 
-[[bin]]
+[[example]]
 name = "generate_test_keys"
-path = "src/bin/generate_test_keys.rs"
+path = "utils/generate_test_keys.rs"
 
 [features]
 default = ["std"]
