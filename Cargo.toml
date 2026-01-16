@@ -20,7 +20,7 @@ schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_ba
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
-spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
+spin = { version = "0.9", default-features = false, features = ["once"] }
 rand = { version = "0.8", features = ["getrandom"] }
 
 [dev-dependencies]
@@ -42,11 +42,8 @@ std = [
     "ark-vrf/std",
     "ark-vrf/parallel"
 ]
-# Small ring 255, default to 16127
-small-ring = []
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
-    "spin",
     "ark-vrf/test-vectors",
 ]
