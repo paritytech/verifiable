@@ -707,12 +707,10 @@ mod tests {
 		let context = b"Context";
 		let message = b"FooBar";
 
-		let start = Instant::now();
-		let _ = R::ring_prover_params(); // init once cell
-		println!(
-			"* PCS params decode: {} ms",
-			(Instant::now() - start).as_millis()
-		);
+		timed("PCS params decode", 1000, || {
+			R::decode_psc_params()
+		});
+		R::ring_prover_params();  // init once cell
 
 		let members: Vec<_> = (0..10)
 			.map(|i| {
@@ -722,14 +720,15 @@ mod tests {
 			.collect();
 		let member = members[3].clone();
 
-		let start = Instant::now();
 		let commitment = timed("Open", 10, || {
 			BandersnatchVrfVerifiable::<R>::open(&member, members.clone().into_iter()).unwrap()
 		});
 		println!("  Commitment size: {} bytes", commitment.encoded_size());
+
 		let encoded_commitment = timed("Commitment encode", 100, || {
 			commitment.encode()
 		});
+
 		timed("Commitment decode", 5, || {
 			<BandersnatchVrfVerifiable::<R> as GenerateVerifiable>::Commitment::decode(&mut &encoded_commitment.clone()[..]).unwrap()
 		});
@@ -810,10 +809,7 @@ mod tests {
 
 	fn open_validate_single_vs_multiple_keys<R: RingParams>() {
 		use std::time::Instant;
-
-		let start = Instant::now();
 		let _ = R::ring_prover_params(); // init once cell
-		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
 
 		let members: Vec<_> = (0..255)
 			.map(|i| {
