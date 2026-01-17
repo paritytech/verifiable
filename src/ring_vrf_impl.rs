@@ -25,6 +25,7 @@ const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
 
 pub trait RingParams {
 	const MAX_RING_SIZE: usize;
+	const PARAMS_PATH: &str;
 	const RING_BUILDER_PARAMS: &[u8];
 	const EMPTY_RING_COMMITMENT_DATA: &[u8];
 	
@@ -50,6 +51,7 @@ pub trait RingParams {
 pub struct SmallRingParams;
 impl RingParams for SmallRingParams {
 	const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 11);
+	const PARAMS_PATH: &str = "ring-data/ring-builder-params-small.bin";
 	const RING_BUILDER_PARAMS: &[u8] = include_bytes!("ring-data/ring-builder-params-small.bin");
 	const EMPTY_RING_COMMITMENT_DATA: &[u8] = include_bytes!("ring-data/ring-builder-small.bin");
 
@@ -63,6 +65,7 @@ impl RingParams for SmallRingParams {
 pub struct FullRingParams;
 impl RingParams for FullRingParams {
 	const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 16);
+	const PARAMS_PATH: &str = "ring-data/ring-builder-params-full.bin";
 	const RING_BUILDER_PARAMS: &[u8] = include_bytes!("ring-data/ring-builder-params-full.bin");
 	const EMPTY_RING_COMMITMENT_DATA: &[u8] = include_bytes!("ring-data/ring-builder-full.bin");
 
@@ -400,18 +403,9 @@ mod tests {
 		use std::fs::File;
 		use std::io::{Read, Write};
 
-		const FULL_ZCASH_SRS_FILE: &str = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-srs-2-16-uncompressed.bin"
-		);
-		const SRS_COMPRESSED_FILE: &str = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/srs-compressed.bin"
-		);
-		const SRS_UNCOMPRESSED_FILE: &str = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/srs-uncompressed.bin"
-		);
+		const FULL_ZCASH_SRS_FILE: &str = "/src/ring-data/zcash-srs-2-16-uncompressed.bin";
+		const SRS_COMPRESSED_FILE: &str = "/src/ring-data/srs-compressed.bin";
+		const SRS_UNCOMPRESSED_FILE: &str = "/src/ring-data/srs-uncompressed.bin";
 
 		let mut buf = vec![];
 		let mut file = File::open(FULL_ZCASH_SRS_FILE).unwrap();
@@ -439,35 +433,21 @@ mod tests {
 	#[test]
 	#[ignore = "ring builder generator"]
 	fn generate_empty_ring_builder() {
+		generate_ring_files::<SmallRingParams>("ring-builder-small.bin", "ring-builder-params-small.bin");
+		generate_ring_files::<FullRingParams>("ring-builder-full.bin", "ring-builder-params-full.bin");
+	}
+
+	fn generate_ring_files<R: RingParams>(builder_path: &str, params_path: &str) {
 		use std::io::Write;
-		#[cfg(feature = "small-ring")]
-		const RING_BUILDER_FILE: &str = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/ring-builder-small.bin"
-		);
-		#[cfg(not(feature = "small-ring"))]
-		const RING_BUILDER_FILE: &str = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/ring-builder-full.bin"
-		);
-
-		#[cfg(feature = "small-ring")]
-		const RING_BUILDER_PARAMS_FILE: &str = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/ring-builder-params-small.bin"
-		);
-		#[cfg(not(feature = "small-ring"))]
-		const RING_BUILDER_PARAMS_FILE: &str = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/ring-builder-params-full.bin"
-		);
-
-		let (builder, builder_params) = start_members_from_params::<SmallRingParams>();
+		// prepend src and ring-data to the paths
+		let builder_path = std::path::Path::new("src").join("ring-data").join(builder_path);
+		let params_path = std::path::Path::new("src").join("ring-data").join(params_path);
+		let (builder, builder_params) = start_members_from_params::<R>();
 
 		let mut buf = Vec::with_capacity(builder.uncompressed_size());
 		builder.serialize_uncompressed(&mut buf).unwrap();
-		println!("Writing empty ring builder to: {}", RING_BUILDER_FILE);
-		let mut file = std::fs::File::create(RING_BUILDER_FILE).unwrap(); // Create or truncate the file
+		println!("Writing empty ring builder to: {}", builder_path.display());
+		let mut file = std::fs::File::create(builder_path).unwrap(); // Create or truncate the file
 		file.write_all(&buf).unwrap();
 
 		let mut buf = Vec::with_capacity(builder_params.0.uncompressed_size());
@@ -475,9 +455,9 @@ mod tests {
 		println!("G1 len: {}", builder_params.0.len());
 		println!(
 			"Writing ring builder params to: {}",
-			RING_BUILDER_PARAMS_FILE
+			params_path.display()
 		);
-		let mut file = std::fs::File::create(RING_BUILDER_PARAMS_FILE).unwrap(); // Create or truncate the file
+		let mut file = std::fs::File::create(params_path).unwrap(); // Create or truncate the file
 		file.write_all(&buf).unwrap();
 	}
 
@@ -882,20 +862,3 @@ mod tests {
 		assert!(BandersnatchVrfVerifiable::<R>::is_member_valid(&valid_member));
 	}
 }
-
-
-/*
-
-* PCS params decode: 27 ms
-* Open: 71 ms
-  Commitment size: 12322611 bytes
-* Create: 242 ms
-  Proof size: 788 bytes
-* Start members: 0 ms
-* Push 10 members: 5 ms
-* Finish members: 0 ms
-* Validate: 11 ms
-* Alias: 0 ms
-
-
-*/
