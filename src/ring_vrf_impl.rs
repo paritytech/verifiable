@@ -23,14 +23,19 @@ const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
 	)
 }
 
+/// Parameters for a Ring VRF.
 pub trait RingParams {
+	/// The size of the ring itself, note that this is not the number of keys that fit in the ring.
 	const MAX_RING_SIZE: usize;
-	const PARAMS_PATH: &str;
+	/// The encoded `RingBuilderPcsParams`.
 	const RING_BUILDER_PARAMS: &[u8];
+	/// The encoded empty ring commitment data.
 	const EMPTY_RING_COMMITMENT_DATA: &[u8];
 	
+	/// Proof parameters for the ring.
 	fn ring_prover_params() -> &'static bandersnatch::RingProofParams;
 
+	/// Intermediate function to decode the proof parameters from the encoded parameters.
 	fn decode_psc_params() -> bandersnatch::RingProofParams {
 		let pcs_params =
 				bandersnatch::PcsParams::deserialize_uncompressed_unchecked(VERIFIABLE_SRS_RAW)
@@ -38,6 +43,7 @@ pub trait RingParams {
 			bandersnatch::RingProofParams::from_pcs_params(Self::MAX_RING_SIZE, pcs_params).unwrap()
 	}
 
+	/// Verifier builder parameters for the ring.
 	fn ring_verifier_builder_params() -> RingBuilderParams {
 		use ark_vrf::ring::G1Affine;
 		let inner = <Vec<G1Affine<BandersnatchSha512Ell2>>>::deserialize_uncompressed_unchecked(
@@ -48,10 +54,10 @@ pub trait RingParams {
 	}
 }
 
+/// A ring with up to 255 members.
 pub struct SmallRingParams;
 impl RingParams for SmallRingParams {
 	const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 11);
-	const PARAMS_PATH: &str = "ring-data/ring-builder-params-small.bin";
 	const RING_BUILDER_PARAMS: &[u8] = include_bytes!("ring-data/ring-builder-params-small.bin");
 	const EMPTY_RING_COMMITMENT_DATA: &[u8] = include_bytes!("ring-data/ring-builder-small.bin");
 
@@ -62,10 +68,10 @@ impl RingParams for SmallRingParams {
 	}
 }
 
+/// A ring with up to 16127 members.
 pub struct FullRingParams;
 impl RingParams for FullRingParams {
 	const MAX_RING_SIZE: usize = max_ring_size_from_pcs_domain_size(1 << 16);
-	const PARAMS_PATH: &str = "ring-data/ring-builder-params-full.bin";
 	const RING_BUILDER_PARAMS: &[u8] = include_bytes!("ring-data/ring-builder-params-full.bin");
 	const EMPTY_RING_COMMITMENT_DATA: &[u8] = include_bytes!("ring-data/ring-builder-full.bin");
 
@@ -498,6 +504,7 @@ mod tests {
 	fn check_precomputed_size_full() {
 		check_precomputed_size::<FullRingParams>();
 	}
+
 	fn check_precomputed_size<R: RingParams>() {
 		let secret = BandersnatchVrfVerifiable::<R>::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::<R>::member_from_secret(&secret);
@@ -523,6 +530,7 @@ mod tests {
 	fn start_push_finish_full() {
 		start_push_finish::<FullRingParams>();
 	}
+
 	fn start_push_finish<R: RingParams>() {
 		let alice_sec = BandersnatchVrfVerifiable::<R>::new_secret([0u8; 32]);
 		let bob_sec = BandersnatchVrfVerifiable::<R>::new_secret([1u8; 32]);
@@ -575,6 +583,7 @@ mod tests {
 	fn start_push_finish_multiple_members_full() {
 		start_push_finish_multiple_members::<FullRingParams>();
 	}
+
 	fn start_push_finish_multiple_members<R: RingParams>() {
 		let alice_sec = BandersnatchVrfVerifiable::<R>::new_secret([0u8; 32]);
 		let bob_sec = BandersnatchVrfVerifiable::<R>::new_secret([1u8; 32]);
@@ -687,7 +696,7 @@ mod tests {
 		let context = b"Context";
 		let message = b"FooBar";
 
-		timed("PCS params decode", 1000, || {
+		timed("PCS params decode", 100, || {
 			R::decode_psc_params()
 		});
 		R::ring_prover_params();  // init once cell
@@ -730,11 +739,11 @@ mod tests {
 				.ok_or(())
 		};
 
-		let inter = timed("Start members", 1000, || {
+		let inter = timed("Start members", 100, || {
 			BandersnatchVrfVerifiable::<R>::start_members()
 		});
 
-		let inter = timed("Push members", 1000, || {
+		let inter = timed("Push members", 100, || {
 			let mut inter = inter.clone();
 
 			members.iter().for_each(|member| {
