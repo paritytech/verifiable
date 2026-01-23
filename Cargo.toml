@@ -21,17 +21,21 @@ ark-serialize = { version = "0.5", default-features = false, features = ["derive
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
-rand = { version = "0.8", features = ["getrandom"] }
+rand = { version = "0.8", features = ["getrandom"], optional = true }
 
 [dev-dependencies]
 rand_core = "0.6"
+paste = "1.0"
 
 [[bin]]
 name = "generate_test_keys"
 path = "src/bin/generate_test_keys.rs"
+required-features = ["generate-keys"]
 
 [features]
 default = ["std"]
+# Enable the generate_test_keys binary. Requires std.
+generate-keys = ["std", "rand"]
 std = [
     "bounded-collections/std",
     "parity-scale-codec/std",
@@ -40,10 +44,12 @@ std = [
     "ark-serialize/std",
     "ark-scale/std",
     "ark-vrf/std",
-    "ark-vrf/parallel"
+    "ark-vrf/parallel",
 ]
-# Small ring 255, default to 16127
-small-ring = []
+# Include ring builder params binary data for building ring commitments.
+# Disable this feature to reduce library size in production environments
+# that only need to validate proofs (not build new ring commitments).
+builder-params = []
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [

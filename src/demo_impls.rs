@@ -2,6 +2,17 @@ use super::*;
 use bounded_collections::{BoundedVec, ConstU32};
 use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
+/// Unit type implements DomainSize for demo implementations that don't use ring VRF.
+impl DomainSize for () {
+	fn max_ring_size(&self) -> usize {
+		1024
+	}
+
+	fn exponent(&self) -> u8 {
+		10 // 2^10 = 1024
+	}
+}
+
 // Example impls:
 
 /// Totally insecure Anonymizer: Member and Secret are both the same `[u8; 32]` and the proof is
@@ -18,12 +29,13 @@ impl GenerateVerifiable for Trivial {
 	type Proof = [u8; 32];
 	type Signature = [u8; 32];
 	type StaticChunk = ();
+	type DomainSize = ();
 
 	fn is_member_valid(_member: &Self::Member) -> bool {
 		true
 	}
 
-	fn start_members() -> Self::Intermediate {
+	fn start_members(_domain_size: ()) -> Self::Intermediate {
 		BoundedVec::new()
 	}
 
@@ -50,6 +62,7 @@ impl GenerateVerifiable for Trivial {
 	}
 
 	fn open(
+		_domain_size: (),
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -73,6 +86,7 @@ impl GenerateVerifiable for Trivial {
 	}
 
 	fn validate(
+		_domain_size: (),
 		proof: &Self::Proof,
 		members: &Self::Members,
 		_context: &[u8],
@@ -118,12 +132,13 @@ impl GenerateVerifiable for Simple {
 	type Proof = ([u8; 64], Alias);
 	type Signature = [u8; 64];
 	type StaticChunk = ();
+	type DomainSize = ();
 
 	fn is_member_valid(_member: &Self::Member) -> bool {
 		true
 	}
 
-	fn start_members() -> Self::Intermediate {
+	fn start_members(_domain_size: ()) -> Self::Intermediate {
 		BoundedVec::new()
 	}
 
@@ -152,6 +167,7 @@ impl GenerateVerifiable for Simple {
 	}
 
 	fn open(
+		_domain_size: (),
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -182,6 +198,7 @@ impl GenerateVerifiable for Simple {
 	}
 
 	fn validate(
+		_domain_size: (),
 		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
@@ -235,7 +252,7 @@ mod tests {
 		let alice = <Simple as GenerateVerifiable>::member_from_secret(&alice_sec);
 		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
-		let mut inter = <Simple as GenerateVerifiable>::start_members();
+		let mut inter = <Simple as GenerateVerifiable>::start_members(());
 		<Simple as GenerateVerifiable>::push_members(
 			&mut inter,
 			[alice.clone()].into_iter(),
@@ -253,23 +270,31 @@ mod tests {
 		let message = b"Hello world";
 
 		let r = SimpleReceipt::create(
+			(),
 			&alice_sec,
 			members.iter().cloned(),
 			context,
 			message.to_vec(),
 		)
 		.unwrap();
-		let (alias, msg) = r.verify(&members, &context).unwrap();
+		let (alias, msg) = r.verify((), &members, context).unwrap();
 		assert_eq!(&message[..], &msg[..]);
 		assert_eq!(alias, alice);
 
-		let r = SimpleReceipt::create(&bob_sec, members.iter().cloned(), context, message.to_vec())
-			.unwrap();
-		let (alias, msg) = r.verify(&members, &context).unwrap();
+		let r = SimpleReceipt::create(
+			(),
+			&bob_sec,
+			members.iter().cloned(),
+			context,
+			message.to_vec(),
+		)
+		.unwrap();
+		let (alias, msg) = r.verify((), &members, context).unwrap();
 		assert_eq!(&message[..], &msg[..]);
 		assert_eq!(alias, bob);
 
 		assert!(SimpleReceipt::create(
+			(),
 			&charlie_sec,
 			members.iter().cloned(),
 			context,
