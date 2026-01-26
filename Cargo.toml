@@ -16,19 +16,19 @@ derive-where = "1.2"
 bounded-collections = { version = "0.1.8", default-features = false }
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
-schnorrkel = { version = "0.10.2", default-features = false, features = ["u64_backend"] }
+schnorrkel = { version = "0.11.5", default-features = false, optional = true }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
-rand = { version = "0.8", features = ["getrandom"] }
 
 [dev-dependencies]
+rand = { version = "0.8", features = ["getrandom"] }
 rand_core = "0.6"
 
-[[bin]]
+[[example]]
 name = "generate_test_keys"
-path = "src/bin/generate_test_keys.rs"
+path = "utils/generate_test_keys.rs"
 
 [features]
 default = ["std"]
@@ -36,12 +36,13 @@ std = [
     "bounded-collections/std",
     "parity-scale-codec/std",
     "scale-info/std",
-    "schnorrkel/std",
+    "schnorrkel?/std",
     "ark-serialize/std",
     "ark-scale/std",
     "ark-vrf/std",
     "ark-vrf/parallel"
 ]
+schnorrkel = ["dep:schnorrkel"]
 # Small ring 255, default to 16127
 small-ring = []
 # Prover for no-std environments with deterministic ring-proof.
