@@ -174,11 +174,8 @@ fn make_alias(output: &bandersnatch::Output) -> Alias {
 pub struct BandersnatchVrfVerifiable;
 
 impl BandersnatchVrfVerifiable {
-	fn to_public_key(
-		value: &EncodedPublicKey,
-	) -> Result<PublicKey, ()> {
-		let pt =
-			bandersnatch::AffinePoint::deserialize_compressed(&value.0[..]).map_err(|_| ())?;
+	fn to_public_key(value: &EncodedPublicKey) -> Result<PublicKey, ()> {
+		let pt = bandersnatch::AffinePoint::deserialize_compressed(&value.0[..]).map_err(|_| ())?;
 		Ok(PublicKey(pt.into()))
 	}
 
@@ -199,6 +196,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Commitment = (u32, ArkScale<bandersnatch::RingProverKey>);
 	type Proof = [u8; RING_VRF_SIGNATURE_SIZE];
 	type Signature = [u8; PLAIN_VRF_SIGNATURE_SIZE];
+	type AccStep = (Self::Proof, Self::Members, Vec<u8>, Vec<u8>);
 	type StaticChunk = StaticChunk;
 
 	fn start_members() -> Self::Intermediate {
@@ -243,6 +241,20 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Self::to_encoded_public_key(&PublicKey(secret.public().0))
 	}
 
+	fn batch_step(
+		proof: &Self::Proof,
+		members: &Self::Members,
+		context: &[u8],
+		message: &[u8],
+	) -> Self::AccStep {
+		(
+			proof.clone(),
+			members.clone(),
+			context.to_vec(),
+			message.to_vec(),
+		)
+	}
+
 	fn validate(
 		proof: &Self::Proof,
 		members: &Self::Members,
@@ -270,6 +282,32 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		.map_err(|_| ())?;
 
 		Ok(make_alias(&signature.output))
+	}
+
+	fn batch_validate(steps: Vec<Self::AccStep>) -> Result<Vec<Alias>, ()> {
+		let mut aliases = Vec::with_capacity(steps.len());
+		for (proof, members, context, message) in steps.into_iter() {
+			aliases.push(Self::validate(
+				&proof,
+				&members,
+				&context[..],
+				&message[..],
+			)?);
+		}
+		Ok(aliases)
+	}
+
+	fn batch_is_valid(steps: Vec<(Self::AccStep, Alias)>) -> bool {
+		let proofs = steps.iter().map(|x| x.0.clone()).collect();
+		let Ok(aliases) = Self::batch_validate(proofs) else {
+			return false;
+		};
+		for (actual, expected) in aliases.iter().zip(steps.iter().map(|x| x.1)) {
+			if *actual != expected {
+				return false;
+			}
+		}
+		true
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {

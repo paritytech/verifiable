@@ -67,6 +67,10 @@ pub trait GenerateVerifiable {
 	/// A signature, creatable from a `Secret` for a message and which can be verified as valid
 	/// with respect to the corresponding `Member`.
 	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
+	/// A multi-proof fragment which can be verified in a batch with other such fragments. It is
+	/// generated using a proof along with the data necessary to verify it in a context (the root of
+	/// the ring in which it was created, the context and the message).
+	type AccStep: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 
@@ -137,6 +141,16 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()>;
 
+	/// Generate a batch verification step out of a proof and the information needed to verify it
+	/// independently. The result of this operation should be used in a batch verification operation
+	/// along with other such steps.
+	fn batch_step(
+		_proof: &Self::Proof,
+		_members: &Self::Members,
+		_context: &[u8],
+		_message: &[u8],
+	) -> Self::AccStep;
+
 	/// Make a non-anonymous signature of `message` using `secret`.
 	fn sign(_secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
 		Err(())
@@ -169,6 +183,18 @@ pub trait GenerateVerifiable {
 		_message: &[u8],
 	) -> Result<Alias, ()> {
 		Err(())
+	}
+
+	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
+	/// in order of input.
+	fn batch_validate(_steps: Vec<Self::AccStep>) -> Result<Vec<Alias>, ()> {
+		Err(())
+	}
+
+	/// Check whether all of the proofs in this batch are valid and that the resulting `Alias` is
+	/// the same as the one provided as input.
+	fn batch_is_valid(_steps: Vec<(Self::AccStep, Alias)>) -> bool {
+		false
 	}
 
 	fn verify_signature(
