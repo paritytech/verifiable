@@ -568,78 +568,40 @@ mod builder_tests {
 		file.write_all(&buf).unwrap();
 	}
 
-	// These are used to generate parameters for each domain size.
 	// Run only if there are some breaking changes in the backend crypto and binaries
 	// need to be re-generated.
-	fn generate_ring_builder_for_domain(
-		domain_size: RingDomainSize,
-		builder_file: &str,
-		params_file: &str,
-	) {
+	#[test]
+	#[ignore = "ring builder generator - generates ring data for all domain sizes"]
+	fn generate_empty_ring_builders() {
 		use std::io::Write;
 
-		let (builder, builder_params) = start_members_from_params(domain_size);
+		for domain_size in RingDomainSize::ALL {
+			let (builder, builder_params) = start_members_from_params(domain_size);
 
-		let mut buf = Vec::with_capacity(builder.uncompressed_size());
-		builder.serialize_uncompressed(&mut buf).unwrap();
-		println!("Writing empty ring builder to: {}", builder_file);
-		let mut file = std::fs::File::create(builder_file).unwrap();
-		file.write_all(&buf).unwrap();
+			let builder_file = format!(
+				"{}/src/ring-data/ring-builder-domain{}.bin",
+				env!("CARGO_MANIFEST_DIR"),
+				domain_size.as_power()
+			);
+			let params_file = format!(
+				"{}/src/ring-data/ring-builder-params-domain{}.bin",
+				env!("CARGO_MANIFEST_DIR"),
+				domain_size.as_power()
+			);
 
-		let mut buf = Vec::with_capacity(builder_params.0.uncompressed_size());
-		builder_params.0.serialize_uncompressed(&mut buf).unwrap();
-		println!("G1 len: {}", builder_params.0.len());
-		println!("Writing ring builder params to: {}", params_file);
-		let mut file = std::fs::File::create(params_file).unwrap();
-		file.write_all(&buf).unwrap();
-	}
+			let mut buf = Vec::with_capacity(builder.uncompressed_size());
+			builder.serialize_uncompressed(&mut buf).unwrap();
+			println!("Writing empty ring builder to: {}", builder_file);
+			let mut file = std::fs::File::create(&builder_file).unwrap();
+			file.write_all(&buf).unwrap();
 
-	#[test]
-	#[ignore = "ring builder generator - generates Domain11 ring data (max 255 members)"]
-	fn generate_empty_ring_builder_domain11() {
-		generate_ring_builder_for_domain(
-			RingDomainSize::Domain11,
-			concat!(
-				env!("CARGO_MANIFEST_DIR"),
-				"/src/ring-data/ring-builder-domain11.bin"
-			),
-			concat!(
-				env!("CARGO_MANIFEST_DIR"),
-				"/src/ring-data/ring-builder-params-domain11.bin"
-			),
-		);
-	}
-
-	#[test]
-	#[ignore = "ring builder generator - generates Domain12 ring data (max 767 members)"]
-	fn generate_empty_ring_builder_domain12() {
-		generate_ring_builder_for_domain(
-			RingDomainSize::Domain12,
-			concat!(
-				env!("CARGO_MANIFEST_DIR"),
-				"/src/ring-data/ring-builder-domain12.bin"
-			),
-			concat!(
-				env!("CARGO_MANIFEST_DIR"),
-				"/src/ring-data/ring-builder-params-domain12.bin"
-			),
-		);
-	}
-
-	#[test]
-	#[ignore = "ring builder generator - generates Domain16 ring data (max 16127 members)"]
-	fn generate_empty_ring_builder_domain16() {
-		generate_ring_builder_for_domain(
-			RingDomainSize::Domain16,
-			concat!(
-				env!("CARGO_MANIFEST_DIR"),
-				"/src/ring-data/ring-builder-domain16.bin"
-			),
-			concat!(
-				env!("CARGO_MANIFEST_DIR"),
-				"/src/ring-data/ring-builder-params-domain16.bin"
-			),
-		);
+			let mut buf = Vec::with_capacity(builder_params.0.uncompressed_size());
+			builder_params.0.serialize_uncompressed(&mut buf).unwrap();
+			println!("G1 len: {}", builder_params.0.len());
+			println!("Writing ring builder params to: {}", params_file);
+			let mut file = std::fs::File::create(&params_file).unwrap();
+			file.write_all(&buf).unwrap();
+		}
 	}
 
 	test_for_all_domains!(check_pre_constructed_ring_builder, |domain_size| {
