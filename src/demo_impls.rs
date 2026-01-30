@@ -248,7 +248,7 @@ impl GenerateVerifiable for Simple {
 mod tests {
 	use super::*;
 
-	#[cfg(and(
+	#[cfg(all(
 		feature = "schnorrkel",
 		any(feature = "std", feature = "no-std-prover")
 	))]
