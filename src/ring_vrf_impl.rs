@@ -23,8 +23,6 @@ const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
 	)
 }
 
-use crate::DomainSize;
-
 /// Concrete domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
 /// This determines the maximum ring size that can be supported:
@@ -53,8 +51,8 @@ impl RingDomainSize {
 		}
 	}
 
-	/// Returns the actual domain size (2^power).
-	pub const fn size(self) -> usize {
+	/// Returns the actual PCS domain size (2^power).
+	pub const fn pcs_domain_size(self) -> usize {
 		1 << self.as_power()
 	}
 
@@ -66,13 +64,9 @@ impl RingDomainSize {
 	];
 }
 
-impl DomainSize for RingDomainSize {
-	fn max_ring_size(&self) -> usize {
-		max_ring_size_from_pcs_domain_size(self.size())
-	}
-
-	fn exponent(&self) -> u8 {
-		self.as_power() as u8
+impl Capacity for RingDomainSize {
+	fn size(&self) -> usize {
+		max_ring_size_from_pcs_domain_size(self.pcs_domain_size())
 	}
 }
 
@@ -90,7 +84,7 @@ mod ring_params {
 #[cfg(any(feature = "std", feature = "builder-params"))]
 use ring_params::*;
 
-/// Ring commitment binary data.
+/// Ring commitment serialized binary data.
 mod ring_commitment_data {
 	pub const DOMAIN_11_EMPTY_RING_COMMITMENT_DATA: &[u8] =
 		include_bytes!("ring-data/ring-builder-domain11.bin");
@@ -144,8 +138,7 @@ fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::Rin
 		let pcs_params =
 			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(VERIFIABLE_SRS_RAW)
 				.unwrap();
-		bandersnatch::RingProofParams::from_pcs_params(domain_size.max_ring_size(), pcs_params)
-			.unwrap()
+		bandersnatch::RingProofParams::from_pcs_params(domain_size.size(), pcs_params).unwrap()
 	})
 }
 
@@ -166,8 +159,7 @@ fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::Rin
 		let pcs_params =
 			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(VERIFIABLE_SRS_RAW)
 				.unwrap();
-		bandersnatch::RingProofParams::from_pcs_params(domain_size.max_ring_size(), pcs_params)
-			.unwrap()
+		bandersnatch::RingProofParams::from_pcs_params(domain_size.size(), pcs_params).unwrap()
 	})
 }
 
@@ -285,10 +277,11 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	type Proof = [u8; RING_VRF_SIGNATURE_SIZE];
 	type Signature = [u8; PLAIN_VRF_SIGNATURE_SIZE];
 	type StaticChunk = StaticChunk;
-	type DomainSize = RingDomainSize;
+	type Capacity = RingDomainSize;
 
-	fn start_members(domain_size: RingDomainSize) -> Self::Intermediate {
-		let data = match domain_size {
+	fn start_members(capacity: RingDomainSize) -> Self::Intermediate {
+		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
+		let data = match capacity {
 			RingDomainSize::Domain11 => DOMAIN_11_EMPTY_RING_COMMITMENT_DATA,
 			RingDomainSize::Domain12 => DOMAIN_12_EMPTY_RING_COMMITMENT_DATA,
 			RingDomainSize::Domain16 => DOMAIN_16_EMPTY_RING_COMMITMENT_DATA,
@@ -330,7 +323,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	}
 
 	fn validate(
-		domain_size: RingDomainSize,
+		capacity: RingDomainSize,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
@@ -338,10 +331,8 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> Result<Alias, ()> {
 		// This doesn't require the whole kzg. Thus is more appropriate if used on-chain
 		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
-		let ring_verifier = bandersnatch::RingProofParams::verifier_no_context(
-			members.0.clone(),
-			domain_size.max_ring_size(),
-		);
+		let ring_verifier =
+			bandersnatch::RingProofParams::verifier_no_context(members.0.clone(), capacity.size());
 
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
 		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
@@ -399,7 +390,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn open(
-		domain_size: RingDomainSize,
+		capacity: RingDomainSize,
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -409,17 +400,8 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let member = Self::to_public_key(member)?;
 		let member_idx = pks.iter().position(|&m| m == member.0).ok_or(())?;
 		let member_idx = member_idx as u32;
-		let prover_key = ring_prover_params(domain_size).prover_key(&pks[..]);
-		Ok((domain_size, member_idx, prover_key.into()))
-	}
-
-	#[cfg(not(any(feature = "std", feature = "no-std-prover")))]
-	fn open(
-		_domain_size: RingDomainSize,
-		_member: &Self::Member,
-		_members: impl Iterator<Item = Self::Member>,
-	) -> Result<Self::Commitment, ()> {
-		panic!("not implemented: requires `std` or `no-std-prover`")
+		let prover_key = ring_prover_params(capacity).prover_key(&pks[..]);
+		Ok((capacity, member_idx, prover_key.into()))
 	}
 
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
@@ -456,16 +438,6 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 			.map_err(|_| ())?;
 
 		Ok((buf, alias))
-	}
-
-	#[cfg(not(any(feature = "std", feature = "no-std-prover")))]
-	fn create(
-		_commitment: Self::Commitment,
-		_secret: &Self::Secret,
-		_context: &[u8],
-		_message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
-		panic!("not implemented: requires `std` or `no-std-prover`")
 	}
 
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
@@ -920,7 +892,7 @@ mod builder_tests {
 		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
 
 		// Use the domain's max ring size to test at capacity
-		let max_members = domain_size.max_ring_size();
+		let max_members = domain_size.size();
 		println!(
 			"* Testing with {} members (max for {:?})",
 			max_members, domain_size

@@ -2,14 +2,10 @@ use super::*;
 use bounded_collections::{BoundedVec, ConstU32};
 use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
-/// Unit type implements DomainSize for demo implementations that don't use ring VRF.
-impl DomainSize for () {
-	fn max_ring_size(&self) -> usize {
+/// Unit type implements Capacity for demo implementations that don't use ring VRF.
+impl Capacity for () {
+	fn size(&self) -> usize {
 		1024
-	}
-
-	fn exponent(&self) -> u8 {
-		10 // 2^10 = 1024
 	}
 }
 
@@ -29,13 +25,13 @@ impl GenerateVerifiable for Trivial {
 	type Proof = [u8; 32];
 	type Signature = [u8; 32];
 	type StaticChunk = ();
-	type DomainSize = ();
+	type Capacity = ();
 
 	fn is_member_valid(_member: &Self::Member) -> bool {
 		true
 	}
 
-	fn start_members(_domain_size: ()) -> Self::Intermediate {
+	fn start_members(_capacity: ()) -> Self::Intermediate {
 		BoundedVec::new()
 	}
 
@@ -61,8 +57,9 @@ impl GenerateVerifiable for Trivial {
 		secret.clone()
 	}
 
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn open(
-		_domain_size: (),
+		_capacity: (),
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -73,6 +70,7 @@ impl GenerateVerifiable for Trivial {
 		Ok((member.clone(), set))
 	}
 
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn create(
 		(member, _): Self::Commitment,
 		secret: &Self::Secret,
@@ -86,7 +84,7 @@ impl GenerateVerifiable for Trivial {
 	}
 
 	fn validate(
-		_domain_size: (),
+		_capacity: (),
 		proof: &Self::Proof,
 		members: &Self::Members,
 		_context: &[u8],
@@ -132,13 +130,13 @@ impl GenerateVerifiable for Simple {
 	type Proof = ([u8; 64], Alias);
 	type Signature = [u8; 64];
 	type StaticChunk = ();
-	type DomainSize = ();
+	type Capacity = ();
 
 	fn is_member_valid(_member: &Self::Member) -> bool {
 		true
 	}
 
-	fn start_members(_domain_size: ()) -> Self::Intermediate {
+	fn start_members(_capacity: ()) -> Self::Intermediate {
 		BoundedVec::new()
 	}
 
@@ -166,8 +164,9 @@ impl GenerateVerifiable for Simple {
 		pair.public.to_bytes()
 	}
 
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn open(
-		_domain_size: (),
+		_capacity: (),
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -178,6 +177,7 @@ impl GenerateVerifiable for Simple {
 		Ok((member.clone(), set))
 	}
 
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn create(
 		(member, _): Self::Commitment,
 		secret: &Self::Secret,
@@ -198,7 +198,7 @@ impl GenerateVerifiable for Simple {
 	}
 
 	fn validate(
-		_domain_size: (),
+		_capacity: (),
 		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
@@ -244,6 +244,7 @@ impl GenerateVerifiable for Simple {
 mod tests {
 	use super::*;
 
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	#[test]
 	fn simple_works() {
 		let alice_sec = <Simple as GenerateVerifiable>::new_secret([0u8; 32]);
@@ -256,11 +257,11 @@ mod tests {
 		<Simple as GenerateVerifiable>::push_members(
 			&mut inter,
 			[alice.clone()].into_iter(),
-			|_| Ok(vec![()]),
+			|_| Ok(alloc::vec![()]),
 		)
 		.unwrap();
 		<Simple as GenerateVerifiable>::push_members(&mut inter, [bob.clone()].into_iter(), |_| {
-			Ok(vec![()])
+			Ok(alloc::vec![()])
 		})
 		.unwrap();
 		let members = <Simple as GenerateVerifiable>::finish_members(inter);
