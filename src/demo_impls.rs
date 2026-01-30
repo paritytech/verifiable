@@ -1,5 +1,6 @@
 use super::*;
 use bounded_collections::{BoundedVec, ConstU32};
+#[cfg(feature = "schnorrkel")]
 use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
 /// Unit type implements Capacity for demo implementations that don't use ring VRF.
@@ -114,13 +115,16 @@ impl GenerateVerifiable for Trivial {
 	}
 }
 
+#[cfg(feature = "schnorrkel")]
 const SIG_CON: &[u8] = b"verifiable";
 
 /// Example impl of `Verifiable` which uses Schnorrkel. This doesn't anonymise anything.
+#[cfg(feature = "schnorrkel")]
 #[derive(
 	Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking,
 )]
 pub struct Simple;
+#[cfg(feature = "schnorrkel")]
 impl GenerateVerifiable for Simple {
 	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
@@ -244,7 +248,10 @@ impl GenerateVerifiable for Simple {
 mod tests {
 	use super::*;
 
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(and(
+		feature = "schnorrkel",
+		any(feature = "std", feature = "no-std-prover")
+	))]
 	#[test]
 	fn simple_works() {
 		let alice_sec = <Simple as GenerateVerifiable>::new_secret([0u8; 32]);
@@ -304,8 +311,10 @@ mod tests {
 		.is_err());
 	}
 
+	#[cfg(feature = "schnorrkel")]
 	const SIG_CON: &[u8] = b"test";
 
+	#[cfg(feature = "schnorrkel")]
 	#[test]
 	fn simple_crypto() {
 		let secret = [0; 32];
@@ -348,6 +357,7 @@ mod tests {
 		));
 	}
 
+	#[cfg(feature = "schnorrkel")]
 	#[test]
 	fn simple_signature_works() {
 		let secret = [0; 32];
