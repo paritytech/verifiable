@@ -48,8 +48,6 @@ std = [
 # that only need to validate proofs (not build new ring commitments).
 builder-params = []
 schnorrkel = ["dep:schnorrkel"]
-# Small ring 255, default to 16127
-small-ring = []
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
