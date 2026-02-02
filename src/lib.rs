@@ -12,6 +12,14 @@ use scale_info::*;
 pub mod demo_impls;
 pub mod ring_vrf_impl;
 
+/// Trait for capacity types used in ring operations.
+///
+/// The capacity determines the maximum ring size that can be supported.
+pub trait Capacity: Clone + Copy {
+	/// Returns the maximum ring size for this capacity.
+	fn size(&self) -> usize;
+}
+
 // Fixed types:
 
 /// Cryptographic identifier for a person within a specific application which deals with people.
@@ -70,8 +78,12 @@ pub trait GenerateVerifiable {
 
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 
+	/// The capacity type used to parametrize ring operations.
+	/// Must implement the `Capacity` trait which provides `size()`.
+	type Capacity: Clone + Copy + Capacity;
+
 	/// Begin building a `Members` value.
-	fn start_members() -> Self::Intermediate;
+	fn start_members(capacity: Self::Capacity) -> Self::Intermediate;
 
 	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
 	/// value.
@@ -110,7 +122,9 @@ pub trait GenerateVerifiable {
 	///
 	/// **WARNING**: This function may panic if called from on-chain or an environment not
 	/// implementing the functionality.
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn open(
+		capacity: Self::Capacity,
 		member: &Self::Member,
 		members_iter: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()>;
@@ -130,6 +144,7 @@ pub trait GenerateVerifiable {
 	///
 	/// **WARNING**: This function may panic if called from on-chain or an environment not
 	/// implementing the functionality.
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn create(
 		commitment: Self::Commitment,
 		secret: &Self::Secret,
@@ -146,13 +161,14 @@ pub trait GenerateVerifiable {
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
 	/// that they elected to opine `message`.
 	fn is_valid(
+		capacity: Self::Capacity,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
 		alias: &Alias,
 		message: &[u8],
 	) -> bool {
-		match Self::validate(proof, members, context, message) {
+		match Self::validate(capacity, proof, members, context, message) {
 			Ok(a) => &a == alias,
 			Err(()) => false,
 		}
@@ -163,6 +179,7 @@ pub trait GenerateVerifiable {
 
 	/// Like `is_valid`, but `alias` is returned, not provided.
 	fn validate(
+		_capacity: Self::Capacity,
 		_proof: &Self::Proof,
 		_members: &Self::Members,
 		_context: &[u8],
@@ -191,7 +208,9 @@ pub struct Receipt<Gen: GenerateVerifiable> {
 }
 
 impl<Gen: GenerateVerifiable> Receipt<Gen> {
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	pub fn create<'a>(
+		capacity: Gen::Capacity,
 		secret: &Gen::Secret,
 		members: impl Iterator<Item = Gen::Member>,
 		context: &[u8],
@@ -200,7 +219,7 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	where
 		Gen::Member: 'a,
 	{
-		let commitment = Gen::open(&Gen::member_from_secret(secret), members)?;
+		let commitment = Gen::open(capacity, &Gen::member_from_secret(secret), members)?;
 		let (proof, alias) = Gen::create(commitment, secret, context, &message)?;
 		Ok(Self {
 			proof,
@@ -217,11 +236,16 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	pub fn into_parts(self) -> (Alias, Vec<u8>) {
 		(self.alias, self.message)
 	}
-	pub fn verify(self, members: &Gen::Members, context: &[u8]) -> Result<(Alias, Vec<u8>), Self> {
-		match Gen::validate(&self.proof, members, context, &self.message) {
+	pub fn verify(
+		self,
+		capacity: Gen::Capacity,
+		members: &Gen::Members,
+		context: &[u8],
+	) -> Result<(Alias, Vec<u8>), Self> {
+		match Gen::validate(capacity, &self.proof, members, context, &self.message) {
 			Ok(alias) => Ok((alias, self.message)),
 			Err(()) => {
-				if self.is_valid(members, context) {
+				if self.is_valid(capacity, members, context) {
 					Ok(self.into_parts())
 				} else {
 					Err(self)
@@ -229,7 +253,19 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 			}
 		}
 	}
-	pub fn is_valid(&self, members: &Gen::Members, context: &[u8]) -> bool {
-		Gen::is_valid(&self.proof, members, context, &self.alias, &self.message)
+	pub fn is_valid(
+		&self,
+		capacity: Gen::Capacity,
+		members: &Gen::Members,
+		context: &[u8],
+	) -> bool {
+		Gen::is_valid(
+			capacity,
+			&self.proof,
+			members,
+			context,
+			&self.alias,
+			&self.message,
+		)
 	}
 }

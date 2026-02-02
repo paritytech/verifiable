@@ -25,6 +25,7 @@ spin = { version = "0.9", default-features = false, features = ["once"], optiona
 [dev-dependencies]
 rand = { version = "0.8", features = ["getrandom"] }
 rand_core = "0.6"
+paste = "1.0"
 
 [[example]]
 name = "generate_test_keys"
@@ -40,11 +41,13 @@ std = [
     "ark-serialize/std",
     "ark-scale/std",
     "ark-vrf/std",
-    "ark-vrf/parallel"
+    "ark-vrf/parallel",
 ]
+# Include ring builder params binary data for building ring commitments.
+# Disable this feature to reduce library size in production environments
+# that only need to validate proofs (not build new ring commitments).
+builder-params = []
 schnorrkel = ["dep:schnorrkel"]
-# Small ring 255, default to 16127
-small-ring = []
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
