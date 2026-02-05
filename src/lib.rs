@@ -10,7 +10,7 @@ use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEn
 use scale_info::*;
 
 pub mod demo_impls;
-pub mod ring_vrf_impl;
+pub mod ring;
 
 /// Trait for capacity types used in ring operations.
 ///

@@ -11,9 +11,7 @@ use scale_info::TypeInfo;
 
 use super::*;
 
-/// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
-pub type BandersnatchVrfVerifiable =
-	RingVrfVerifiable<ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2>;
+pub mod bandersnatch;
 
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
@@ -98,29 +96,29 @@ pub struct Bls12_381RingData;
 impl RingCurveData for Bls12_381RingData {
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn srs_raw() -> &'static [u8] {
-		include_bytes!("ring-data/srs-uncompressed.bin")
+		include_bytes!("data/srs-uncompressed.bin")
 	}
 
 	#[cfg(any(feature = "std", feature = "builder-params"))]
 	fn ring_builder_params(domain: RingDomainSize) -> &'static [u8] {
 		match domain {
 			RingDomainSize::Domain11 => {
-				include_bytes!("ring-data/ring-builder-params-domain11.bin")
+				include_bytes!("data/ring-builder-params-domain11.bin")
 			}
 			RingDomainSize::Domain12 => {
-				include_bytes!("ring-data/ring-builder-params-domain12.bin")
+				include_bytes!("data/ring-builder-params-domain12.bin")
 			}
 			RingDomainSize::Domain16 => {
-				include_bytes!("ring-data/ring-builder-params-domain16.bin")
+				include_bytes!("data/ring-builder-params-domain16.bin")
 			}
 		}
 	}
 
 	fn empty_ring_commitment(domain: RingDomainSize) -> &'static [u8] {
 		match domain {
-			RingDomainSize::Domain11 => include_bytes!("ring-data/ring-builder-domain11.bin"),
-			RingDomainSize::Domain12 => include_bytes!("ring-data/ring-builder-domain12.bin"),
-			RingDomainSize::Domain16 => include_bytes!("ring-data/ring-builder-domain16.bin"),
+			RingDomainSize::Domain11 => include_bytes!("data/ring-builder-domain11.bin"),
+			RingDomainSize::Domain12 => include_bytes!("data/ring-builder-domain12.bin"),
+			RingDomainSize::Domain16 => include_bytes!("data/ring-builder-domain16.bin"),
 		}
 	}
 }
@@ -217,52 +215,6 @@ pub trait RingSuiteExt: RingSuite + 'static {
 	/// [`impl_ring_params_cache!`] for static caching.
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	type ParamsCache: RingProofParamsCache<Self>;
-}
-
-/// Static cache for Bandersnatch ring proof params.
-#[cfg(any(feature = "std", feature = "no-std-prover"))]
-pub struct BandersnatchParamsCache;
-
-#[cfg(any(feature = "std", feature = "no-std-prover"))]
-impl RingProofParamsCache<ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2>
-	for BandersnatchParamsCache
-{
-	type Handle = &'static ark_vrf::ring::RingProofParams<
-		ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2,
-	>;
-
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		use ark_vrf::suites::bandersnatch;
-		use spin::Once;
-
-		static D11: Once<bandersnatch::RingProofParams> = Once::new();
-		static D12: Once<bandersnatch::RingProofParams> = Once::new();
-		static D16: Once<bandersnatch::RingProofParams> = Once::new();
-
-		match domain_size {
-			RingDomainSize::Domain11 => D11.call_once(|| make_ring_prover_params(domain_size)),
-			RingDomainSize::Domain12 => D12.call_once(|| make_ring_prover_params(domain_size)),
-			RingDomainSize::Domain16 => D16.call_once(|| make_ring_prover_params(domain_size)),
-		}
-	}
-}
-
-impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
-	const PUBLIC_KEY_SIZE: usize = 32;
-	const MEMBERS_SET_SIZE: usize = 432;
-	const MEMBERS_COMMITMENT_SIZE: usize = 384;
-	const STATIC_CHUNK_SIZE: usize = 48;
-	const RING_PROOF_SIZE: usize = 788;
-	const SIGNATURE_SIZE: usize = 96;
-
-	type CurveData = Bls12_381RingData;
-
-	type PublicKeyBytes = [u8; Self::PUBLIC_KEY_SIZE];
-	type RingProofBytes = [u8; Self::RING_PROOF_SIZE];
-	type SignatureBytes = [u8; Self::SIGNATURE_SIZE];
-
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
-	type ParamsCache = BandersnatchParamsCache;
 }
 
 macro_rules! impl_common_traits {
@@ -573,34 +525,6 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 	fn is_member_valid(member: &Self::Member) -> bool {
 		Self::to_public_key(member).is_ok()
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn test_plain_signature() {
-		let msg = b"asd";
-		let secret = BandersnatchVrfVerifiable::new_secret([0; 32]);
-		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let signature = BandersnatchVrfVerifiable::sign(&secret, msg).unwrap();
-		let res = BandersnatchVrfVerifiable::verify_signature(&signature, msg, &public);
-		assert!(res);
-	}
-
-	#[test]
-	fn test_is_member_valid_invalid() {
-		let invalid_member = [0u8; 32];
-		assert!(!BandersnatchVrfVerifiable::is_member_valid(&invalid_member));
-	}
-
-	#[test]
-	fn test_is_member_valid_valid() {
-		let secret = BandersnatchVrfVerifiable::new_secret([42u8; 32]);
-		let valid_member = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		assert!(BandersnatchVrfVerifiable::is_member_valid(&valid_member));
 	}
 }
 
