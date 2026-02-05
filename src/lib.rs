@@ -9,8 +9,8 @@ use core::{fmt::Debug, ops::Range};
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
-pub mod demo_impls;
-pub mod ring_vrf_impl;
+pub mod demo;
+pub mod ring;
 
 /// Trait for capacity types used in ring operations.
 ///
