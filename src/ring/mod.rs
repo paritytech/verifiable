@@ -96,29 +96,29 @@ pub struct Bls12_381RingData;
 impl RingCurveData for Bls12_381RingData {
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn srs_raw() -> &'static [u8] {
-		include_bytes!("data/srs-uncompressed.bin")
+		include_bytes!("data/bls12-381/srs-uncompressed.bin")
 	}
 
 	#[cfg(any(feature = "std", feature = "builder-params"))]
 	fn ring_builder_params(domain: RingDomainSize) -> &'static [u8] {
 		match domain {
 			RingDomainSize::Domain11 => {
-				include_bytes!("data/ring-builder-params-domain11.bin")
+				include_bytes!("data/bls12-381/ring-builder-params-domain11.bin")
 			}
 			RingDomainSize::Domain12 => {
-				include_bytes!("data/ring-builder-params-domain12.bin")
+				include_bytes!("data/bls12-381/ring-builder-params-domain12.bin")
 			}
 			RingDomainSize::Domain16 => {
-				include_bytes!("data/ring-builder-params-domain16.bin")
+				include_bytes!("data/bls12-381/ring-builder-params-domain16.bin")
 			}
 		}
 	}
 
 	fn empty_ring_commitment(domain: RingDomainSize) -> &'static [u8] {
 		match domain {
-			RingDomainSize::Domain11 => include_bytes!("data/ring-builder-domain11.bin"),
-			RingDomainSize::Domain12 => include_bytes!("data/ring-builder-domain12.bin"),
-			RingDomainSize::Domain16 => include_bytes!("data/ring-builder-domain16.bin"),
+			RingDomainSize::Domain11 => include_bytes!("data/bls12-381/ring-builder-domain11.bin"),
+			RingDomainSize::Domain12 => include_bytes!("data/bls12-381/ring-builder-domain12.bin"),
+			RingDomainSize::Domain16 => include_bytes!("data/bls12-381/ring-builder-domain16.bin"),
 		}
 	}
 }
