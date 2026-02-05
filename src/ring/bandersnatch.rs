@@ -227,15 +227,15 @@ mod builder_tests {
 
 		const FULL_ZCASH_SRS_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/zcash-srs-2-16-uncompressed.bin"
+			"/src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin"
 		);
 		const SRS_COMPRESSED_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/srs-compressed.bin"
+			"/src/ring/data/bls12-381/srs-compressed.bin"
 		);
 		const SRS_UNCOMPRESSED_FILE: &str = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/src/ring-data/srs-uncompressed.bin"
+			"/src/ring/data/bls12-381/srs-uncompressed.bin"
 		);
 
 		let mut buf = vec![];
@@ -277,12 +277,12 @@ mod builder_tests {
 			let (builder, builder_params) = start_members_from_params(domain_size);
 
 			let builder_file = format!(
-				"{}/src/ring-data/ring-builder-domain{}.bin",
+				"{}/src/ring/data/bls12-381/ring-builder-domain{}.bin",
 				env!("CARGO_MANIFEST_DIR"),
 				domain_size.as_power()
 			);
 			let params_file = format!(
-				"{}/src/ring-data/ring-builder-params-domain{}.bin",
+				"{}/src/ring/data/bls12-381/ring-builder-params-domain{}.bin",
 				env!("CARGO_MANIFEST_DIR"),
 				domain_size.as_power()
 			);
