@@ -161,12 +161,6 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 		+ AsRef<[u8]>
 		+ AsMut<[u8]>;
 
-	/// Create a zero-initialized ring proof buffer.
-	fn zero_proof() -> Self::RingProofBytes;
-
-	/// Create a zero-initialized signature buffer.
-	fn zero_signature() -> Self::SignatureBytes;
-
 	/// Encoded size of a public key.
 	const PUBLIC_KEY_SIZE: usize;
 	/// Encoded size of MembersSet (Intermediate).
@@ -184,6 +178,12 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 	fn ring_proof_params(
 		domain_size: RingDomainSize,
 	) -> &'static ark_vrf::ring::RingProofParams<Self>;
+
+	/// Create a zero-initialized ring proof buffer.
+	fn zero_proof() -> Self::RingProofBytes;
+
+	/// Create a zero-initialized signature buffer.
+	fn zero_signature() -> Self::SignatureBytes;
 }
 
 impl RingSuiteTypes for bandersnatch::BandersnatchSha512Ell2 {
@@ -223,24 +223,7 @@ const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableVrfInput";
 #[cfg(any(feature = "std", feature = "builder-params"))]
 pub type RingBuilderParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
-macro_rules! impl_scale {
-	// Concrete type version
-	($type_name:ident, $encoded_size:expr) => {
-		ark_scale::impl_scale_via_ark!($type_name);
-
-		impl scale::MaxEncodedLen for $type_name {
-			fn max_encoded_len() -> usize {
-				$encoded_size
-			}
-		}
-
-		impl scale_info::TypeInfo for $type_name {
-			type Identity = [u8; $encoded_size];
-			fn type_info() -> scale_info::Type {
-				Self::Identity::type_info()
-			}
-		}
-	};
+macro_rules! impl_common_traits {
 	// Generic type version - size comes from RingSuiteTypes trait
 	($type_name:ident<S: $bound:path>, $size_expr:expr) => {
 		impl<S: $bound> Decode for $type_name<S> {
@@ -273,6 +256,16 @@ macro_rules! impl_scale {
 					}))
 			}
 		}
+
+		impl<S: $bound> core::cmp::PartialEq for $type_name<S> {
+			fn eq(&self, other: &Self) -> bool {
+				self.encode() == other.encode()
+			}
+		}
+
+		impl<S: $bound> core::cmp::Eq for $type_name<S> {}
+
+		impl<S: $bound> DecodeWithMemTracking for $type_name<S> {}
 	};
 }
 
@@ -335,7 +328,7 @@ pub fn ring_verifier_builder_params(domain_size: RingDomainSize) -> RingBuilderP
 #[derive_where::derive_where(Clone)]
 pub struct MembersSet<S: RingSuite>(pub(crate) ark_vrf::ring::RingVerifierKeyBuilder<S>);
 
-impl_scale!(MembersSet<S: RingSuiteTypes>, S::MEMBERS_SET_SIZE);
+impl_common_traits!(MembersSet<S: RingSuiteTypes>, S::MEMBERS_SET_SIZE);
 
 impl<S: RingSuite> core::fmt::Debug for MembersSet<S> {
 	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -343,21 +336,11 @@ impl<S: RingSuite> core::fmt::Debug for MembersSet<S> {
 	}
 }
 
-impl<S: RingSuiteTypes> core::cmp::PartialEq for MembersSet<S> {
-	fn eq(&self, other: &Self) -> bool {
-		self.encode() == other.encode()
-	}
-}
-
-impl<S: RingSuiteTypes> core::cmp::Eq for MembersSet<S> {}
-
-impl<S: RingSuiteTypes> DecodeWithMemTracking for MembersSet<S> {}
-
 #[derive(CanonicalDeserialize, CanonicalSerialize)]
 #[derive_where::derive_where(Clone)]
 pub struct MembersCommitment<S: RingSuite>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
 
-impl_scale!(MembersCommitment<S: RingSuiteTypes>, S::MEMBERS_COMMITMENT_SIZE);
+impl_common_traits!(MembersCommitment<S: RingSuiteTypes>, S::MEMBERS_COMMITMENT_SIZE);
 
 impl<S: RingSuite> core::fmt::Debug for MembersCommitment<S> {
 	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -365,52 +348,17 @@ impl<S: RingSuite> core::fmt::Debug for MembersCommitment<S> {
 	}
 }
 
-impl<S: RingSuiteTypes> core::cmp::PartialEq for MembersCommitment<S> {
-	fn eq(&self, other: &Self) -> bool {
-		self.encode() == other.encode()
-	}
-}
-
-impl<S: RingSuiteTypes> core::cmp::Eq for MembersCommitment<S> {}
-
-impl<S: RingSuiteTypes> DecodeWithMemTracking for MembersCommitment<S> {}
-
-const PUBLIC_KEY_SIZE: usize = 32;
-
-#[derive(
-	Clone, Eq, PartialEq, Debug, Encode, Decode, TypeInfo, MaxEncodedLen, DecodeWithMemTracking,
-)]
-pub struct EncodedPublicKey(pub [u8; PUBLIC_KEY_SIZE]);
-
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 #[derive_where::derive_where(Clone, Debug)]
 pub struct PublicKey<S: RingSuite>(pub(crate) ark_vrf::AffinePoint<S>);
 
-impl_scale!(PublicKey<S: RingSuiteTypes>, S::PUBLIC_KEY_SIZE);
-
-impl<S: RingSuiteTypes> core::cmp::PartialEq for PublicKey<S> {
-	fn eq(&self, other: &Self) -> bool {
-		self.encode() == other.encode()
-	}
-}
-
-impl<S: RingSuiteTypes> core::cmp::Eq for PublicKey<S> {}
+impl_common_traits!(PublicKey<S: RingSuiteTypes>, S::PUBLIC_KEY_SIZE);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 #[derive_where::derive_where(Clone, Debug)]
 pub struct StaticChunk<S: RingSuite>(pub ark_vrf::ring::G1Affine<S>);
 
-impl_scale!(StaticChunk<S: RingSuiteTypes>, S::STATIC_CHUNK_SIZE);
-
-impl<S: RingSuiteTypes> core::cmp::PartialEq for StaticChunk<S> {
-	fn eq(&self, other: &Self) -> bool {
-		self.encode() == other.encode()
-	}
-}
-
-impl<S: RingSuiteTypes> core::cmp::Eq for StaticChunk<S> {}
-
-impl<S: RingSuiteTypes> DecodeWithMemTracking for StaticChunk<S> {}
+impl_common_traits!(StaticChunk<S: RingSuiteTypes>, S::STATIC_CHUNK_SIZE);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct IetfVrfSignature<S: RingSuite> {
