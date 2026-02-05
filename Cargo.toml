@@ -19,7 +19,7 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 schnorrkel = { version = "0.11.5", default-features = false, optional = true }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
+ark-vrf = { version = "0.1.1", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
 
 [dev-dependencies]

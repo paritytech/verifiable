@@ -7,14 +7,14 @@ use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 #[cfg(any(feature = "std", feature = "builder-params"))]
 use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
-use ark_vrf::{ring::Verifier, suites::bandersnatch};
+use ark_vrf::{
+	ring::{RingSuite, Verifier},
+	suites::bandersnatch,
+};
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
 use super::*;
-
-#[cfg(any(feature = "std", feature = "no-std-prover"))]
-pub(crate) const VERIFIABLE_SRS_RAW: &[u8] = include_bytes!("ring-data/srs-uncompressed.bin");
 
 /// The max ring that can be handled for both sign/verify for the given PCS domain size.
 const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
@@ -55,13 +55,6 @@ impl RingDomainSize {
 	pub const fn pcs_domain_size(self) -> usize {
 		1 << self.as_power()
 	}
-
-	/// All available domain sizes.
-	pub const ALL: [RingDomainSize; 3] = [
-		RingDomainSize::Domain11,
-		RingDomainSize::Domain12,
-		RingDomainSize::Domain16,
-	];
 }
 
 impl Capacity for RingDomainSize {
@@ -70,30 +63,109 @@ impl Capacity for RingDomainSize {
 	}
 }
 
-/// Ring builder params binary data.
-/// Only available with the `builder-params` feature.
-#[cfg(any(feature = "std", feature = "builder-params"))]
-mod ring_params {
-	pub const DOMAIN_11_RING_BUILDER_PARAMS: &[u8] =
-		include_bytes!("ring-data/ring-builder-params-domain11.bin");
-	pub const DOMAIN_12_RING_BUILDER_PARAMS: &[u8] =
-		include_bytes!("ring-data/ring-builder-params-domain12.bin");
-	pub const DOMAIN_16_RING_BUILDER_PARAMS: &[u8] =
-		include_bytes!("ring-data/ring-builder-params-domain16.bin");
-}
-#[cfg(any(feature = "std", feature = "builder-params"))]
-use ring_params::*;
+// ---------------------------------------------------------------------------
+// Traits for generic ring VRF support
+// ---------------------------------------------------------------------------
 
-/// Ring commitment serialized binary data.
-mod ring_commitment_data {
-	pub const DOMAIN_11_EMPTY_RING_COMMITMENT_DATA: &[u8] =
-		include_bytes!("ring-data/ring-builder-domain11.bin");
-	pub const DOMAIN_12_EMPTY_RING_COMMITMENT_DATA: &[u8] =
-		include_bytes!("ring-data/ring-builder-domain12.bin");
-	pub const DOMAIN_16_EMPTY_RING_COMMITMENT_DATA: &[u8] =
-		include_bytes!("ring-data/ring-builder-domain16.bin");
+/// Trait for providing pairing-curve-specific ring data.
+///
+/// All RingSuites that use the same pairing curve can share the same data provider.
+/// For example, all suites using BLS12-381 (like Bandersnatch) use `Bls12_381RingData`.
+pub trait RingCurveData {
+	/// Raw SRS data (powers of tau).
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	fn srs_raw() -> &'static [u8];
+
+	/// Ring builder params for a given domain size.
+	#[cfg(any(feature = "std", feature = "builder-params"))]
+	fn ring_builder_params(domain: RingDomainSize) -> &'static [u8];
+
+	/// Empty ring commitment data for a given domain size.
+	fn empty_ring_commitment(domain: RingDomainSize) -> &'static [u8];
 }
-use ring_commitment_data::*;
+
+/// Ring data for suites using BLS12-381 pairing (e.g., Bandersnatch curves).
+pub struct Bls12_381RingData;
+
+impl RingCurveData for Bls12_381RingData {
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	fn srs_raw() -> &'static [u8] {
+		include_bytes!("ring-data/srs-uncompressed.bin")
+	}
+
+	#[cfg(any(feature = "std", feature = "builder-params"))]
+	fn ring_builder_params(domain: RingDomainSize) -> &'static [u8] {
+		match domain {
+			RingDomainSize::Domain11 => {
+				include_bytes!("ring-data/ring-builder-params-domain11.bin")
+			}
+			RingDomainSize::Domain12 => {
+				include_bytes!("ring-data/ring-builder-params-domain12.bin")
+			}
+			RingDomainSize::Domain16 => {
+				include_bytes!("ring-data/ring-builder-params-domain16.bin")
+			}
+		}
+	}
+
+	fn empty_ring_commitment(domain: RingDomainSize) -> &'static [u8] {
+		match domain {
+			RingDomainSize::Domain11 => include_bytes!("ring-data/ring-builder-domain11.bin"),
+			RingDomainSize::Domain12 => include_bytes!("ring-data/ring-builder-domain12.bin"),
+			RingDomainSize::Domain16 => include_bytes!("ring-data/ring-builder-domain16.bin"),
+		}
+	}
+}
+
+/// Trait providing suite-specific byte array types for ring VRF operations.
+///
+/// This trait defines the concrete array types used for serialized forms of
+/// public keys, proofs, and signatures. Each suite specifies its own sizes.
+pub trait RingSuiteTypes: RingSuite {
+	/// Byte array type for encoded public keys.
+	type EncodedPublicKey: Clone
+		+ Eq
+		+ PartialEq
+		+ Encode
+		+ Decode
+		+ core::fmt::Debug
+		+ TypeInfo
+		+ MaxEncodedLen
+		+ AsRef<[u8]>
+		+ AsMut<[u8]>
+		+ Default
+		+ DecodeWithMemTracking;
+
+	/// Byte array type for ring VRF proofs.
+	type RingProofBytes: Clone
+		+ Eq
+		+ PartialEq
+		+ Encode
+		+ Decode
+		+ core::fmt::Debug
+		+ TypeInfo
+		+ AsRef<[u8]>
+		+ AsMut<[u8]>;
+
+	/// Byte array type for plain VRF signatures.
+	type SignatureBytes: Clone
+		+ Eq
+		+ PartialEq
+		+ Encode
+		+ Decode
+		+ core::fmt::Debug
+		+ TypeInfo
+		+ AsRef<[u8]>
+		+ AsMut<[u8]>;
+}
+
+impl RingSuiteTypes for bandersnatch::BandersnatchSha512Ell2 {
+	type EncodedPublicKey = [u8; 32];
+	type RingProofBytes = [u8; 788];
+	type SignatureBytes = [u8; 96];
+}
+
+// ---------------------------------------------------------------------------
 
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
 
@@ -135,9 +207,10 @@ fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::Rin
 	};
 
 	cell.get_or_init(|| {
-		let pcs_params =
-			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(VERIFIABLE_SRS_RAW)
-				.unwrap();
+		let pcs_params = bandersnatch::PcsParams::deserialize_uncompressed_unchecked(
+			Bls12_381RingData::srs_raw(),
+		)
+		.unwrap();
 		bandersnatch::RingProofParams::from_pcs_params(domain_size.size(), pcs_params).unwrap()
 	})
 }
@@ -156,9 +229,10 @@ fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::Rin
 	};
 
 	cell.call_once(|| {
-		let pcs_params =
-			bandersnatch::PcsParams::deserialize_uncompressed_unchecked(VERIFIABLE_SRS_RAW)
-				.unwrap();
+		let pcs_params = bandersnatch::PcsParams::deserialize_uncompressed_unchecked(
+			Bls12_381RingData::srs_raw(),
+		)
+		.unwrap();
 		bandersnatch::RingProofParams::from_pcs_params(domain_size.size(), pcs_params).unwrap()
 	})
 }
@@ -168,11 +242,7 @@ fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::Rin
 #[cfg(any(feature = "std", feature = "builder-params"))]
 pub fn ring_verifier_builder_params(domain_size: RingDomainSize) -> RingBuilderParams {
 	use ark_vrf::ring::G1Affine;
-	let data = match domain_size {
-		RingDomainSize::Domain11 => DOMAIN_11_RING_BUILDER_PARAMS,
-		RingDomainSize::Domain12 => DOMAIN_12_RING_BUILDER_PARAMS,
-		RingDomainSize::Domain16 => DOMAIN_16_RING_BUILDER_PARAMS,
-	};
+	let data = Bls12_381RingData::ring_builder_params(domain_size);
 	let inner =
 		<Vec<G1Affine<BandersnatchSha512Ell2>>>::deserialize_uncompressed_unchecked(data).unwrap();
 	ark_vrf::ring::RingBuilderPcsParams::<BandersnatchSha512Ell2>(inner)
@@ -281,11 +351,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 
 	fn start_members(capacity: RingDomainSize) -> Self::Intermediate {
 		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = match capacity {
-			RingDomainSize::Domain11 => DOMAIN_11_EMPTY_RING_COMMITMENT_DATA,
-			RingDomainSize::Domain12 => DOMAIN_12_EMPTY_RING_COMMITMENT_DATA,
-			RingDomainSize::Domain16 => DOMAIN_16_EMPTY_RING_COMMITMENT_DATA,
-		};
+		let data = Bls12_381RingData::empty_ring_commitment(capacity);
 		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
 	}
 
@@ -575,7 +641,14 @@ mod builder_tests {
 	fn generate_empty_ring_builders() {
 		use std::io::Write;
 
-		for domain_size in RingDomainSize::ALL {
+		/// All available domain sizes.
+		const ALL: [RingDomainSize; 3] = [
+			RingDomainSize::Domain11,
+			RingDomainSize::Domain12,
+			RingDomainSize::Domain16,
+		];
+
+		for domain_size in ALL {
 			let (builder, builder_params) = start_members_from_params(domain_size);
 
 			let builder_file = format!(
