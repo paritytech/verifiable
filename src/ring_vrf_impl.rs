@@ -5,14 +5,15 @@ pub use ark_vrf;
 
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_vrf::{
-	ring::{RingSuite, Verifier},
-	suites::bandersnatch,
-};
+use ark_vrf::ring::{RingSuite, Verifier};
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
 use super::*;
+
+/// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
+pub type BandersnatchVrfVerifiable =
+	RingVrfVerifiable<ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2>;
 
 /// The max ring that can be handled for both sign/verify for the given PCS domain size.
 const fn max_ring_size_from_pcs_domain_size<S: RingSuite>(pcs_domain_size: usize) -> usize {
@@ -103,57 +104,6 @@ pub trait RingCurveData {
 /// Ring data for suites using BLS12-381 pairing (e.g., Bandersnatch curves).
 pub struct Bls12_381RingData;
 
-#[cfg(feature = "std")]
-fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::RingProofParams {
-	use std::sync::OnceLock;
-	static CELL_11: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
-	static CELL_12: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
-	static CELL_16: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
-
-	let cell = match domain_size {
-		RingDomainSize::Domain11 => &CELL_11,
-		RingDomainSize::Domain12 => &CELL_12,
-		RingDomainSize::Domain16 => &CELL_16,
-	};
-	cell.get_or_init(|| ring_prover_params2(domain_size))
-}
-
-#[cfg(all(not(feature = "std"), feature = "no-std-prover"))]
-fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::RingProofParams {
-	use spin::Once;
-	static CELL_11: Once<bandersnatch::RingProofParams> = Once::new();
-	static CELL_12: Once<bandersnatch::RingProofParams> = Once::new();
-	static CELL_16: Once<bandersnatch::RingProofParams> = Once::new();
-
-	let cell = match domain_size {
-		RingDomainSize::Domain11 => &CELL_11,
-		RingDomainSize::Domain12 => &CELL_12,
-		RingDomainSize::Domain16 => &CELL_16,
-	};
-	cell.call_once(|| ring_prover_params2(domain_size))
-}
-
-#[cfg(any(feature = "std", feature = "no-std-prover"))]
-pub fn ring_prover_params2<S: RingSuiteTypes>(
-	domain_size: RingDomainSize,
-) -> ark_vrf::ring::RingProofParams<S> {
-	let data = S::CurveData::srs_raw();
-	let pcs_params =
-		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap();
-	let ring_size = max_ring_size_from_pcs_domain_size::<S>(domain_size.pcs_domain_size());
-	ark_vrf::ring::RingProofParams::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
-}
-
-/// Get ring builder params for the given domain size.
-/// Only available with the `builder-params` or `std` features.
-#[cfg(any(feature = "std", feature = "builder-params"))]
-pub fn ring_verifier_builder_params<S: RingSuiteTypes>(
-	domain_size: RingDomainSize,
-) -> ark_vrf::ring::RingBuilderPcsParams<S> {
-	let data = S::CurveData::ring_builder_params(domain_size);
-	ark_vrf::ring::RingBuilderPcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap()
-}
-
 impl RingCurveData for Bls12_381RingData {
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn srs_raw() -> &'static [u8] {
@@ -182,6 +132,28 @@ impl RingCurveData for Bls12_381RingData {
 			RingDomainSize::Domain16 => include_bytes!("ring-data/ring-builder-domain16.bin"),
 		}
 	}
+}
+
+/// Construct ring prover params from the suite's SRS data.
+#[cfg(any(feature = "std", feature = "no-std-prover"))]
+pub fn make_ring_prover_params<S: RingSuiteTypes>(
+	domain_size: RingDomainSize,
+) -> ark_vrf::ring::RingProofParams<S> {
+	let data = S::CurveData::srs_raw();
+	let pcs_params =
+		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap();
+	let ring_size = max_ring_size_from_pcs_domain_size::<S>(domain_size.pcs_domain_size());
+	ark_vrf::ring::RingProofParams::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
+}
+
+/// Get ring builder params for the given domain size.
+/// Only available with the `builder-params` or `std` features.
+#[cfg(any(feature = "std", feature = "builder-params"))]
+pub fn ring_verifier_builder_params<S: RingSuiteTypes>(
+	domain_size: RingDomainSize,
+) -> ark_vrf::ring::RingBuilderPcsParams<S> {
+	let data = S::CurveData::ring_builder_params(domain_size);
+	ark_vrf::ring::RingBuilderPcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap()
 }
 
 /// Trait providing suite-specific byte array types for ring VRF operations.
@@ -253,7 +225,7 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 	fn zero_signature() -> Self::SignatureBytes;
 }
 
-impl RingSuiteTypes for bandersnatch::BandersnatchSha512Ell2 {
+impl RingSuiteTypes for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	type EncodedPublicKey = [u8; 32];
 	type RingProofBytes = [u8; 788];
 	type SignatureBytes = [u8; 96];
@@ -269,7 +241,20 @@ impl RingSuiteTypes for bandersnatch::BandersnatchSha512Ell2 {
 	fn ring_proof_params(
 		domain_size: RingDomainSize,
 	) -> &'static ark_vrf::ring::RingProofParams<Self> {
-		ring_prover_params(domain_size)
+		use ark_vrf::suites::bandersnatch;
+		use spin::Once;
+		static CELL_11: Once<bandersnatch::RingProofParams> = Once::new();
+		static CELL_12: Once<bandersnatch::RingProofParams> = Once::new();
+		static CELL_16: Once<bandersnatch::RingProofParams> = Once::new();
+
+		let cell = match domain_size {
+			RingDomainSize::Domain11 => &CELL_11,
+			RingDomainSize::Domain12 => &CELL_12,
+			RingDomainSize::Domain16 => &CELL_16,
+		};
+		cell.call_once(|| {
+			make_ring_prover_params::<bandersnatch::BandersnatchSha512Ell2>(domain_size)
+		})
 	}
 
 	fn zero_proof() -> Self::RingProofBytes {
@@ -598,9 +583,6 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 }
 
-/// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
-pub type BandersnatchVrfVerifiable = RingVrfVerifiable<bandersnatch::BandersnatchSha512Ell2>;
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -674,10 +656,17 @@ mod builder_tests {
 		};
 	}
 
+	fn bandersnatch_ring_prover_params(
+		domain_size: RingDomainSize,
+	) -> &'static ark_vrf::suites::bandersnatch::RingProofParams {
+		BandersnatchSha512Ell2::ring_proof_params(domain_size)
+	}
+
 	fn start_members_from_params(
 		domain_size: RingDomainSize,
 	) -> (MembersSet, RingBuilderPcsParams) {
-		let (builder, builder_pcs_params) = ring_prover_params(domain_size).verifier_key_builder();
+		let (builder, builder_pcs_params) =
+			bandersnatch_ring_prover_params(domain_size).verifier_key_builder();
 		(MembersSet(builder), builder_pcs_params)
 	}
 
@@ -706,7 +695,7 @@ mod builder_tests {
 		println!("Full size: {}", buf.len());
 
 		// Use Domain16 for SRS generation (largest domain)
-		let full_params = ring_prover_params(RingDomainSize::Domain16);
+		let full_params = bandersnatch_ring_prover_params(RingDomainSize::Domain16);
 
 		let mut buf = vec![];
 		full_params.serialize_compressed(&mut buf).unwrap();
@@ -930,7 +919,7 @@ mod builder_tests {
 		let message = b"FooBar";
 
 		let start = Instant::now();
-		let _ = ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_prover_params(domain_size);
 		println!(
 			"* PCS params decode: {} ms",
 			(Instant::now() - start).as_millis()
@@ -1016,7 +1005,7 @@ mod builder_tests {
 
 		let capacity: RingSize = domain_size.into();
 		let start = Instant::now();
-		let _ = ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_prover_params(domain_size);
 		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
 
 		// Use the domain's max ring size to test at capacity

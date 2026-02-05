@@ -20,7 +20,7 @@ schnorrkel = { version = "0.11.5", default-features = false, optional = true }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.1.1", default-features = false, features = ["bandersnatch", "ring"] }
-spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
+spin = { version = "0.9", default-features = false, features = ["once"] }
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["getrandom"] }
@@ -51,6 +51,5 @@ schnorrkel = ["dep:schnorrkel"]
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
-    "spin",
     "ark-vrf/test-vectors",
 ]
