@@ -47,8 +47,34 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 
 #[cfg(test)]
 mod tests {
+	use ark_scale::MaxEncodedLen;
+	use ark_serialize::CanonicalSerialize;
+	use ark_vrf::ring::SrsLookup;
+
 	use super::*;
 	use crate::GenerateVerifiable;
+
+	// Type aliases for Bandersnatch-specific generic types
+	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
+	pub type MembersCommitment = crate::ring::MembersCommitment<BandersnatchSha512Ell2>;
+	pub type PublicKey = crate::ring::PublicKey<BandersnatchSha512Ell2>;
+	pub type StaticChunk = crate::ring::StaticChunk<BandersnatchSha512Ell2>;
+
+	type RingBuilderPcsParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
+
+	pub fn bandersnatch_ring_prover_params(
+		domain_size: RingDomainSize,
+	) -> &'static ark_vrf::suites::bandersnatch::RingProofParams {
+		<BandersnatchSha512Ell2 as RingSuiteExt>::ParamsCache::get(domain_size)
+	}
+
+	pub fn start_members_from_params(
+		domain_size: RingDomainSize,
+	) -> (MembersSet, RingBuilderPcsParams) {
+		let (builder, builder_pcs_params) =
+			bandersnatch_ring_prover_params(domain_size).verifier_key_builder();
+		(crate::ring::MembersSet(builder), builder_pcs_params)
+	}
 
 	#[test]
 	fn test_plain_signature() {
@@ -72,15 +98,68 @@ mod tests {
 		let valid_member = BandersnatchVrfVerifiable::member_from_secret(&secret);
 		assert!(BandersnatchVrfVerifiable::is_member_valid(&valid_member));
 	}
+
+	/// Verify that the size constants in `RingSuiteExt` match actual serialized sizes.
+	#[test]
+	fn codec_assumptions_check() {
+		use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 as S;
+
+		// PUBLIC_KEY_SIZE
+		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
+		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
+		let internal = BandersnatchVrfVerifiable::to_public_key(&public).unwrap();
+		assert_eq!(internal.compressed_size(), S::PUBLIC_KEY_SIZE);
+		assert_eq!(PublicKey::max_encoded_len(), S::PUBLIC_KEY_SIZE);
+
+		// MEMBERS_SET_SIZE
+		let members_set = BandersnatchVrfVerifiable::start_members(RingDomainSize::Domain11.into());
+		assert_eq!(members_set.compressed_size(), S::MEMBERS_SET_SIZE);
+		assert_eq!(MembersSet::max_encoded_len(), S::MEMBERS_SET_SIZE);
+
+		// MEMBERS_COMMITMENT_SIZE
+		let commitment = BandersnatchVrfVerifiable::finish_members(members_set);
+		assert_eq!(commitment.compressed_size(), S::MEMBERS_COMMITMENT_SIZE);
+		assert_eq!(
+			MembersCommitment::max_encoded_len(),
+			S::MEMBERS_COMMITMENT_SIZE
+		);
+
+		// STATIC_CHUNK_SIZE
+		let (_, builder_params) = start_members_from_params(RingDomainSize::Domain11);
+		let chunks: Vec<_> = (&builder_params).lookup(0..1).unwrap();
+		let chunk: StaticChunk = crate::ring::StaticChunk(chunks[0]);
+		assert_eq!(chunk.compressed_size(), S::STATIC_CHUNK_SIZE);
+		assert_eq!(StaticChunk::max_encoded_len(), S::STATIC_CHUNK_SIZE);
+
+		// SIGNATURE_SIZE
+		let signature = BandersnatchVrfVerifiable::sign(&secret, b"test").unwrap();
+		assert_eq!(signature.len(), S::SIGNATURE_SIZE);
+
+		// RING_PROOF_SIZE
+		let members: Vec<_> = (0..3)
+			.map(|i| {
+				let s = BandersnatchVrfVerifiable::new_secret([i as u8; 32]);
+				BandersnatchVrfVerifiable::member_from_secret(&s)
+			})
+			.collect();
+		let member = members[0].clone();
+		let commitment = BandersnatchVrfVerifiable::open(
+			RingDomainSize::Domain11.into(),
+			&member,
+			members.into_iter(),
+		)
+		.unwrap();
+		let prover_secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
+		let (proof, _) =
+			BandersnatchVrfVerifiable::create(commitment, &prover_secret, b"ctx", b"msg").unwrap();
+		assert_eq!(proof.len(), S::RING_PROOF_SIZE);
+	}
 }
 
 /// Tests that require the `builder-params` feature.
 #[cfg(all(test, feature = "builder-params"))]
 mod builder_tests {
-	use crate::{
-		ring::{ring_verifier_builder_params, StaticChunk},
-		Capacity, GenerateVerifiable,
-	};
+	use crate::{ring::ring_verifier_builder_params, Capacity, GenerateVerifiable};
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
@@ -88,13 +167,12 @@ mod builder_tests {
 	use ark_vrf::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
 	use parity_scale_codec::Encode;
 
-	// Type aliases for Bandersnatch-specific generic types
-	type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
-	type MembersCommitment = crate::ring::MembersCommitment<BandersnatchSha512Ell2>;
-	type PublicKey = crate::ring::PublicKey<BandersnatchSha512Ell2>;
-	type RingSize = crate::ring::RingSize<BandersnatchSha512Ell2>;
+	use tests::{
+		bandersnatch_ring_prover_params, start_members_from_params, MembersCommitment, MembersSet,
+		PublicKey,
+	};
 
-	type RingBuilderPcsParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
+	pub type RingSize = crate::ring::RingSize<BandersnatchSha512Ell2>;
 
 	/// Macro to generate test functions for all implemented domain sizes.
 	///
@@ -126,20 +204,6 @@ mod builder_tests {
 				}
 			}
 		};
-	}
-
-	fn bandersnatch_ring_prover_params(
-		domain_size: RingDomainSize,
-	) -> &'static ark_vrf::suites::bandersnatch::RingProofParams {
-		<BandersnatchSha512Ell2 as RingSuiteExt>::ParamsCache::get(domain_size)
-	}
-
-	fn start_members_from_params(
-		domain_size: RingDomainSize,
-	) -> (MembersSet, RingBuilderPcsParams) {
-		let (builder, builder_pcs_params) =
-			bandersnatch_ring_prover_params(domain_size).verifier_key_builder();
-		(crate::ring::MembersSet(builder), builder_pcs_params)
 	}
 
 	#[test]
@@ -278,7 +342,11 @@ mod builder_tests {
 		let get_many = |range| {
 			(&builder_params)
 				.lookup(range)
-				.map(|v| v.into_iter().map(|i| StaticChunk(i)).collect::<Vec<_>>())
+				.map(|v| {
+					v.into_iter()
+						.map(|i| crate::ring::StaticChunk(i))
+						.collect::<Vec<_>>()
+				})
 				.ok_or(())
 		};
 
@@ -323,7 +391,11 @@ mod builder_tests {
 		let get_many = |range| {
 			(&builder_params)
 				.lookup(range)
-				.map(|v| v.into_iter().map(|i| StaticChunk(i)).collect::<Vec<_>>())
+				.map(|v| {
+					v.into_iter()
+						.map(|i| crate::ring::StaticChunk(i))
+						.collect::<Vec<_>>()
+				})
 				.ok_or(())
 		};
 
@@ -425,7 +497,11 @@ mod builder_tests {
 		let get_many = |range| {
 			(&builder_params)
 				.lookup(range)
-				.map(|v| v.into_iter().map(|i| StaticChunk(i)).collect::<Vec<_>>())
+				.map(|v| {
+					v.into_iter()
+						.map(|i| crate::ring::StaticChunk(i))
+						.collect::<Vec<_>>()
+				})
 				.ok_or(())
 		};
 
@@ -503,7 +579,11 @@ mod builder_tests {
 		let get_many = |range| {
 			(&builder_params)
 				.lookup(range)
-				.map(|v| v.into_iter().map(|i| StaticChunk(i)).collect::<Vec<_>>())
+				.map(|v| {
+					v.into_iter()
+						.map(|i| crate::ring::StaticChunk(i))
+						.collect::<Vec<_>>()
+				})
 				.ok_or(())
 		};
 
