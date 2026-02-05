@@ -25,7 +25,7 @@ fn print_byte_array(name: &str, data: &[u8]) {
     println!();
 }
 
-fn validate_keys(member: &verifiable::ring_vrf_impl::EncodedPublicKey, message: &[u8], signature: &[u8; 96]) {
+fn validate_keys(member: &[u8; 32], message: &[u8], signature: &[u8; 96]) {
     let is_valid = BandersnatchVrfVerifiable::verify_signature(signature, message, member);
     
     if is_valid {
@@ -53,7 +53,7 @@ fn main() {
     
     let signature = BandersnatchVrfVerifiable::sign(&secret, &message).unwrap();
     
-    print_byte_array("TEST_PUBLIC_KEY", &member.0);
+    print_byte_array("TEST_PUBLIC_KEY", &member);
     print_byte_array("TEST_VRF_SIGNATURE", &signature);
     
     for i in 0..2 {
@@ -61,7 +61,7 @@ fn main() {
         rng.fill_bytes(&mut voucher_entropy);
         let voucher_secret = BandersnatchVrfVerifiable::new_secret(voucher_entropy);
         let voucher_member = BandersnatchVrfVerifiable::member_from_secret(&voucher_secret);
-        print_byte_array(VOUCHER_NAMES[i], &voucher_member.0);
+        print_byte_array(VOUCHER_NAMES[i], &voucher_member);
     }
     
     validate_keys(&member, &message, &signature);

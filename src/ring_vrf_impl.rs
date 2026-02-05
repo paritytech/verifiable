@@ -121,13 +121,14 @@ impl RingCurveData for Bls12_381RingData {
 ///
 /// This trait defines the concrete array types used for serialized forms of
 /// public keys, proofs, and signatures. Each suite specifies its own sizes.
-pub trait RingSuiteTypes: RingSuite {
+pub trait RingSuiteTypes: RingSuite + 'static {
 	/// Byte array type for encoded public keys.
 	type EncodedPublicKey: Clone
 		+ Eq
 		+ PartialEq
 		+ Encode
 		+ Decode
+		+ scale::EncodeLike
 		+ core::fmt::Debug
 		+ TypeInfo
 		+ MaxEncodedLen
@@ -142,6 +143,7 @@ pub trait RingSuiteTypes: RingSuite {
 		+ PartialEq
 		+ Encode
 		+ Decode
+		+ scale::EncodeLike
 		+ core::fmt::Debug
 		+ TypeInfo
 		+ AsRef<[u8]>
@@ -153,17 +155,35 @@ pub trait RingSuiteTypes: RingSuite {
 		+ PartialEq
 		+ Encode
 		+ Decode
+		+ scale::EncodeLike
 		+ core::fmt::Debug
 		+ TypeInfo
 		+ AsRef<[u8]>
 		+ AsMut<[u8]>;
 
+	/// Create a zero-initialized ring proof buffer.
+	fn zero_proof() -> Self::RingProofBytes;
+
+	/// Create a zero-initialized signature buffer.
+	fn zero_signature() -> Self::SignatureBytes;
+
+	/// Encoded size of a public key.
+	const PUBLIC_KEY_SIZE: usize;
 	/// Encoded size of MembersSet (Intermediate).
 	const MEMBERS_SET_SIZE: usize;
 	/// Encoded size of MembersCommitment (Members).
 	const MEMBERS_COMMITMENT_SIZE: usize;
 	/// Encoded size of StaticChunk (G1 point).
 	const STATIC_CHUNK_SIZE: usize;
+
+	/// The curve data provider for this suite.
+	type CurveData: RingCurveData;
+
+	/// Get cached ring proof params for this suite.
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	fn ring_proof_params(
+		domain_size: RingDomainSize,
+	) -> &'static ark_vrf::ring::RingProofParams<Self>;
 }
 
 impl RingSuiteTypes for bandersnatch::BandersnatchSha512Ell2 {
@@ -171,24 +191,32 @@ impl RingSuiteTypes for bandersnatch::BandersnatchSha512Ell2 {
 	type RingProofBytes = [u8; 788];
 	type SignatureBytes = [u8; 96];
 
+	const PUBLIC_KEY_SIZE: usize = 32;
 	const MEMBERS_SET_SIZE: usize = 432;
 	const MEMBERS_COMMITMENT_SIZE: usize = 384;
 	const STATIC_CHUNK_SIZE: usize = 48;
+
+	type CurveData = Bls12_381RingData;
+
+	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	fn ring_proof_params(
+		domain_size: RingDomainSize,
+	) -> &'static ark_vrf::ring::RingProofParams<Self> {
+		ring_prover_params(domain_size)
+	}
+
+	fn zero_proof() -> Self::RingProofBytes {
+		[0u8; 788]
+	}
+
+	fn zero_signature() -> Self::SignatureBytes {
+		[0u8; 96]
+	}
 }
-
-/// Generic ring VRF implementation parameterized over suite and curve data.
-///
-/// - `S`: The ring suite (e.g., `BandersnatchSha512Ell2`)
-/// - `D`: The curve data provider (e.g., `Bls12_381RingData`)
-pub struct RingVrfVerifiable<S: RingSuiteTypes, D: RingCurveData>(PhantomData<(S, D)>);
-
-/// Type alias for backwards compatibility - Bandersnatch suite with BLS12-381 data.
-pub type BandersnatchVrfVerifiable =
-	RingVrfVerifiable<bandersnatch::BandersnatchSha512Ell2, Bls12_381RingData>;
 
 // ---------------------------------------------------------------------------
 
-const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
+const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableVrfInput";
 
 /// A sequence of static chunks.
 /// Only available with the `builder-params` feature.
@@ -235,9 +263,13 @@ macro_rules! impl_scale {
 			type Identity = Self;
 			fn type_info() -> scale_info::Type {
 				scale_info::Type::builder()
-					.path(scale_info::Path::new(stringify!($type_name), module_path!()))
+					.path(scale_info::Path::new(
+						stringify!($type_name),
+						module_path!(),
+					))
 					.composite(scale_info::build::Fields::unnamed().field(|f| {
-						f.ty::<alloc::vec::Vec<u8>>().type_name(stringify!($type_name))
+						f.ty::<alloc::vec::Vec<u8>>()
+							.type_name(stringify!($type_name))
 					}))
 			}
 		}
@@ -350,9 +382,19 @@ const PUBLIC_KEY_SIZE: usize = 32;
 )]
 pub struct EncodedPublicKey(pub [u8; PUBLIC_KEY_SIZE]);
 
-#[derive(Clone, Eq, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct PublicKey(bandersnatch::AffinePoint);
-impl_scale!(PublicKey, PUBLIC_KEY_SIZE);
+#[derive(CanonicalSerialize, CanonicalDeserialize)]
+#[derive_where::derive_where(Clone, Debug)]
+pub struct PublicKey<S: RingSuite>(pub(crate) ark_vrf::AffinePoint<S>);
+
+impl_scale!(PublicKey<S: RingSuiteTypes>, S::PUBLIC_KEY_SIZE);
+
+impl<S: RingSuiteTypes> core::cmp::PartialEq for PublicKey<S> {
+	fn eq(&self, other: &Self) -> bool {
+		self.encode() == other.encode()
+	}
+}
+
+impl<S: RingSuiteTypes> core::cmp::Eq for PublicKey<S> {}
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 #[derive_where::derive_where(Clone, Debug)]
@@ -387,35 +429,45 @@ fn make_alias<S: RingSuite>(output: &ark_vrf::Output<S>) -> Alias {
 	Alias::try_from(&output.hash()[..32]).expect("Suite hash should be at least 32 bytes")
 }
 
-impl BandersnatchVrfVerifiable {
-	fn to_public_key(value: &EncodedPublicKey) -> Result<PublicKey, ()> {
-		let pt = bandersnatch::AffinePoint::deserialize_compressed(&value.0[..]).map_err(|_| ())?;
-		Ok(PublicKey(pt.into()))
+/// Generic ring VRF implementation parameterized over the ring suite.
+///
+/// The curve data provider is obtained from `S::CurveData`.
+pub struct RingVrfVerifiable<S: RingSuiteTypes>(PhantomData<S>);
+
+impl<S: RingSuiteTypes> RingVrfVerifiable<S> {
+	fn to_public_key(value: &S::EncodedPublicKey) -> Result<PublicKey<S>, ()> {
+		let pt =
+			ark_vrf::AffinePoint::<S>::deserialize_compressed(value.as_ref()).map_err(|_| ())?;
+		Ok(PublicKey(pt))
 	}
 
-	fn to_encoded_public_key(value: &PublicKey) -> EncodedPublicKey {
-		let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+	fn to_encoded_public_key(value: &PublicKey<S>) -> S::EncodedPublicKey {
+		let mut bytes = S::EncodedPublicKey::default();
 		value.using_encoded(|encoded| {
-			bytes.copy_from_slice(encoded);
+			bytes.as_mut().copy_from_slice(encoded);
 		});
-		EncodedPublicKey(bytes)
+		bytes
 	}
 }
 
-impl GenerateVerifiable for BandersnatchVrfVerifiable {
-	type Members = MembersCommitment<bandersnatch::BandersnatchSha512Ell2>;
-	type Intermediate = MembersSet<bandersnatch::BandersnatchSha512Ell2>;
-	type Member = EncodedPublicKey;
-	type Secret = bandersnatch::Secret;
-	type Commitment = (RingDomainSize, u32, ArkScale<bandersnatch::RingProverKey>);
-	type Proof = <bandersnatch::BandersnatchSha512Ell2 as RingSuiteTypes>::RingProofBytes;
-	type Signature = <bandersnatch::BandersnatchSha512Ell2 as RingSuiteTypes>::SignatureBytes;
-	type StaticChunk = StaticChunk<bandersnatch::BandersnatchSha512Ell2>;
+impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
+	type Members = MembersCommitment<S>;
+	type Intermediate = MembersSet<S>;
+	type Member = S::EncodedPublicKey;
+	type Secret = ark_vrf::Secret<S>;
+	type Commitment = (
+		RingDomainSize,
+		u32,
+		ArkScale<ark_vrf::ring::RingProverKey<S>>,
+	);
+	type Proof = S::RingProofBytes;
+	type Signature = S::SignatureBytes;
+	type StaticChunk = StaticChunk<S>;
 	type Capacity = RingDomainSize;
 
 	fn start_members(capacity: RingDomainSize) -> Self::Intermediate {
 		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = Bls12_381RingData::empty_ring_commitment(capacity);
+		let data = S::CurveData::empty_ring_commitment(capacity);
 		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
 	}
 
@@ -461,19 +513,18 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> Result<Alias, ()> {
 		// This doesn't require the whole kzg. Thus is more appropriate if used on-chain
 		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
-		let ring_verifier =
-			bandersnatch::RingProofParams::verifier_no_context(members.0.clone(), capacity.size());
+		let ring_verifier = ark_vrf::ring::RingProofParams::<S>::verifier_no_context(
+			members.0.clone(),
+			capacity.size(),
+		);
 
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
-		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
+		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 
 		let signature =
-			RingVrfSignature::<bandersnatch::BandersnatchSha512Ell2>::deserialize_compressed(
-				proof.as_slice(),
-			)
-			.map_err(|_| ())?;
+			RingVrfSignature::<S>::deserialize_compressed(proof.as_ref()).map_err(|_| ())?;
 
-		bandersnatch::Public::verify(
+		ark_vrf::Public::<S>::verify(
 			input,
 			signature.output,
 			message,
@@ -488,15 +539,15 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
 		use ark_vrf::ietf::Prover;
 		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
-		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
+		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 		let output = secret.output(input);
 
 		let proof = secret.prove(input, output, b"");
-		let signature = IetfVrfSignature::<bandersnatch::BandersnatchSha512Ell2> { output, proof };
+		let signature = IetfVrfSignature::<S> { output, proof };
 
-		let mut raw = [0u8; 96];
+		let mut raw = S::zero_signature();
 		signature
-			.serialize_compressed(raw.as_mut_slice())
+			.serialize_compressed(raw.as_mut())
 			.map_err(|_| ())?;
 		Ok(raw)
 	}
@@ -507,19 +558,16 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		member: &Self::Member,
 	) -> bool {
 		use ark_vrf::ietf::Verifier;
-		let Ok(signature) =
-			IetfVrfSignature::<bandersnatch::BandersnatchSha512Ell2>::deserialize_compressed(
-				signature.as_slice(),
-			)
+		let Ok(signature) = IetfVrfSignature::<S>::deserialize_compressed(signature.as_ref())
 		else {
 			return false;
 		};
 		let input_msg = [VRF_INPUT_DOMAIN, message].concat();
-		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
+		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 		let Ok(member) = Self::to_public_key(member) else {
 			return false;
 		};
-		let public = bandersnatch::Public::from(member.0);
+		let public = ark_vrf::Public::<S>::from(member.0);
 		public
 			.verify(input, signature.output, b"", &signature.proof)
 			.is_ok()
@@ -537,7 +585,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let member = Self::to_public_key(member)?;
 		let member_idx = pks.iter().position(|&m| m == member.0).ok_or(())?;
 		let member_idx = member_idx as u32;
-		let prover_key = ring_prover_params(capacity).prover_key(&pks[..]);
+		let prover_key = S::ring_proof_params(capacity).prover_key(&pks[..]);
 		Ok((capacity, member_idx, prover_key.into()))
 	}
 
@@ -550,7 +598,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 	) -> Result<(Self::Proof, Alias), ()> {
 		use ark_vrf::ring::Prover;
 		let (domain_size, prover_idx, prover_key) = commitment;
-		let params = ring_prover_params(domain_size);
+		let params = S::ring_proof_params(domain_size);
 		if prover_idx >= params.max_ring_size() as u32 {
 			return Err(());
 		}
@@ -558,20 +606,20 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		let ring_prover = params.prover(prover_key.0, prover_idx as usize);
 
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
-		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
+		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 		let preout = secret.output(input);
 		let alias = make_alias(&preout);
 
 		let proof = secret.prove(input, preout, message, &ring_prover);
 
-		let signature = RingVrfSignature::<bandersnatch::BandersnatchSha512Ell2> {
+		let signature = RingVrfSignature::<S> {
 			output: preout,
 			proof,
 		};
 
-		let mut buf = [0u8; 788];
+		let mut buf = S::zero_proof();
 		signature
-			.serialize_compressed(buf.as_mut_slice())
+			.serialize_compressed(buf.as_mut())
 			.map_err(|_| ())?;
 
 		Ok((buf, alias))
@@ -579,7 +627,7 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
-		let input = bandersnatch::Input::new(&input_msg[..]).expect("H2C can't fail here");
+		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 		let output = secret.output(input);
 		let alias = make_alias(&output);
 		Ok(alias)
@@ -589,6 +637,9 @@ impl GenerateVerifiable for BandersnatchVrfVerifiable {
 		Self::to_public_key(member).is_ok()
 	}
 }
+
+/// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
+pub type BandersnatchVrfVerifiable = RingVrfVerifiable<bandersnatch::BandersnatchSha512Ell2>;
 
 #[cfg(test)]
 mod tests {
@@ -606,7 +657,7 @@ mod tests {
 
 	#[test]
 	fn test_is_member_valid_invalid() {
-		let invalid_member = EncodedPublicKey([0; 32]);
+		let invalid_member = [0u8; 32];
 		assert!(!BandersnatchVrfVerifiable::is_member_valid(&invalid_member));
 	}
 
@@ -624,6 +675,10 @@ mod builder_tests {
 	use super::*;
 	use ark_vrf::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
 
+	// Type aliases for Bandersnatch-specific generic types
+	type MembersSet = super::MembersSet<BandersnatchSha512Ell2>;
+	type MembersCommitment = super::MembersCommitment<BandersnatchSha512Ell2>;
+	type PublicKey = super::PublicKey<BandersnatchSha512Ell2>;
 	type RingBuilderPcsParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
 	/// Macro to generate test functions for all implemented domain sizes.
