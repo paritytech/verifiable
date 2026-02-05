@@ -15,11 +15,6 @@ use super::*;
 pub type BandersnatchVrfVerifiable =
 	RingVrfVerifiable<ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2>;
 
-/// The max ring that can be handled for both sign/verify for the given PCS domain size.
-const fn max_ring_size_from_pcs_domain_size<S: RingSuite>(pcs_domain_size: usize) -> usize {
-	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(pcs_domain_size)
-}
-
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
 /// This determines the maximum ring size that can be supported for a ring suite.
@@ -60,12 +55,12 @@ impl RingDomainSize {
 /// - `Domain12`: max 767 members
 /// - `Domain16`: max 16127 members
 #[derive(Clone, Copy, Encode, Decode, TypeInfo, DecodeWithMemTracking)]
-pub struct RingSize<S: RingSuite> {
+pub struct RingSize<S: RingSuiteExt> {
 	dom_size: RingDomainSize,
 	_phantom: PhantomData<S>,
 }
 
-impl<S: RingSuite> From<RingDomainSize> for RingSize<S> {
+impl<S: RingSuiteExt> From<RingDomainSize> for RingSize<S> {
 	fn from(dom_size: RingDomainSize) -> Self {
 		Self {
 			dom_size,
@@ -74,15 +69,11 @@ impl<S: RingSuite> From<RingDomainSize> for RingSize<S> {
 	}
 }
 
-impl<S: RingSuite> Capacity for RingSize<S> {
+impl<S: RingSuiteExt> Capacity for RingSize<S> {
 	fn size(&self) -> usize {
 		max_ring_size_from_pcs_domain_size::<S>(self.dom_size.pcs_domain_size())
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Traits for generic ring VRF support
-// ---------------------------------------------------------------------------
 
 /// Trait for providing pairing-curve-specific ring data.
 ///
@@ -134,9 +125,14 @@ impl RingCurveData for Bls12_381RingData {
 	}
 }
 
+/// The max ring that can be handled for both sign/verify for the given PCS domain size.
+const fn max_ring_size_from_pcs_domain_size<S: RingSuiteExt>(pcs_domain_size: usize) -> usize {
+	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(pcs_domain_size)
+}
+
 /// Construct ring prover params from the suite's SRS data.
 #[cfg(any(feature = "std", feature = "no-std-prover"))]
-pub fn make_ring_prover_params<S: RingSuiteTypes>(
+pub fn make_ring_prover_params<S: RingSuiteExt>(
 	domain_size: RingDomainSize,
 ) -> ark_vrf::ring::RingProofParams<S> {
 	let data = S::CurveData::srs_raw();
@@ -149,7 +145,7 @@ pub fn make_ring_prover_params<S: RingSuiteTypes>(
 /// Get ring builder params for the given domain size.
 /// Only available with the `builder-params` or `std` features.
 #[cfg(any(feature = "std", feature = "builder-params"))]
-pub fn ring_verifier_builder_params<S: RingSuiteTypes>(
+pub fn ring_verifier_builder_params<S: RingSuiteExt>(
 	domain_size: RingDomainSize,
 ) -> ark_vrf::ring::RingBuilderPcsParams<S> {
 	let data = S::CurveData::ring_builder_params(domain_size);
@@ -169,7 +165,7 @@ impl<const N: usize> EncodedTypesBounds for [u8; N] {
 ///
 /// This trait defines the concrete array types used for serialized forms of
 /// public keys, proofs, and signatures. Each suite specifies its own sizes.
-pub trait RingSuiteTypes: RingSuite + 'static {
+pub trait RingSuiteExt: RingSuite + 'static {
 	/// Encoded size of a public key.
 	const PUBLIC_KEY_SIZE: usize;
 	/// Encoded size of MembersSet (Intermediate).
@@ -178,6 +174,10 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 	const MEMBERS_COMMITMENT_SIZE: usize;
 	/// Encoded size of StaticChunk (G1 point).
 	const STATIC_CHUNK_SIZE: usize;
+	/// Encoded size of RingVrfSignature
+	const RING_PROOF_SIZE: usize;
+	/// Encoded size of IetfVrfSignature
+	const SIGNATURE_SIZE: usize;
 
 	/// Byte array type for encoded public keys.
 	type PublicKeyBytes: EncodedTypesBounds;
@@ -196,17 +196,19 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 	) -> &'static ark_vrf::ring::RingProofParams<Self>;
 }
 
-impl RingSuiteTypes for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
+impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	const PUBLIC_KEY_SIZE: usize = 32;
 	const MEMBERS_SET_SIZE: usize = 432;
 	const MEMBERS_COMMITMENT_SIZE: usize = 384;
 	const STATIC_CHUNK_SIZE: usize = 48;
-
-	type PublicKeyBytes = [u8; 32];
-	type RingProofBytes = [u8; 788];
-	type SignatureBytes = [u8; 96];
+	const RING_PROOF_SIZE: usize = 788;
+	const SIGNATURE_SIZE: usize = 96;
 
 	type CurveData = Bls12_381RingData;
+
+	type PublicKeyBytes = [u8; Self::PUBLIC_KEY_SIZE];
+	type RingProofBytes = [u8; Self::RING_PROOF_SIZE];
+	type SignatureBytes = [u8; Self::SIGNATURE_SIZE];
 
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn ring_proof_params(
@@ -277,11 +279,11 @@ macro_rules! impl_common_traits {
 
 #[derive(CanonicalDeserialize, CanonicalSerialize)]
 #[derive_where::derive_where(Clone)]
-pub struct MembersSet<S: RingSuite>(pub(crate) ark_vrf::ring::RingVerifierKeyBuilder<S>);
+pub struct MembersSet<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKeyBuilder<S>);
 
-impl_common_traits!(MembersSet<S: RingSuiteTypes>, S::MEMBERS_SET_SIZE);
+impl_common_traits!(MembersSet<S: RingSuiteExt>, S::MEMBERS_SET_SIZE);
 
-impl<S: RingSuite> core::fmt::Debug for MembersSet<S> {
+impl<S: RingSuiteExt> core::fmt::Debug for MembersSet<S> {
 	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
 		write!(f, "MembersSet")
 	}
@@ -289,11 +291,11 @@ impl<S: RingSuite> core::fmt::Debug for MembersSet<S> {
 
 #[derive(CanonicalDeserialize, CanonicalSerialize)]
 #[derive_where::derive_where(Clone)]
-pub struct MembersCommitment<S: RingSuite>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
+pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
 
-impl_common_traits!(MembersCommitment<S: RingSuiteTypes>, S::MEMBERS_COMMITMENT_SIZE);
+impl_common_traits!(MembersCommitment<S: RingSuiteExt>, S::MEMBERS_COMMITMENT_SIZE);
 
-impl<S: RingSuite> core::fmt::Debug for MembersCommitment<S> {
+impl<S: RingSuiteExt> core::fmt::Debug for MembersCommitment<S> {
 	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
 		write!(f, "MembersCommitment")
 	}
@@ -301,41 +303,41 @@ impl<S: RingSuite> core::fmt::Debug for MembersCommitment<S> {
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 #[derive_where::derive_where(Clone, Debug)]
-pub struct PublicKey<S: RingSuite>(pub(crate) ark_vrf::AffinePoint<S>);
+pub struct PublicKey<S: RingSuiteExt>(pub(crate) ark_vrf::AffinePoint<S>);
 
-impl_common_traits!(PublicKey<S: RingSuiteTypes>, S::PUBLIC_KEY_SIZE);
+impl_common_traits!(PublicKey<S: RingSuiteExt>, S::PUBLIC_KEY_SIZE);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 #[derive_where::derive_where(Clone, Debug)]
-pub struct StaticChunk<S: RingSuite>(pub ark_vrf::ring::G1Affine<S>);
+pub struct StaticChunk<S: RingSuiteExt>(pub ark_vrf::ring::G1Affine<S>);
 
-impl_common_traits!(StaticChunk<S: RingSuiteTypes>, S::STATIC_CHUNK_SIZE);
+impl_common_traits!(StaticChunk<S: RingSuiteExt>, S::STATIC_CHUNK_SIZE);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-struct IetfVrfSignature<S: RingSuite> {
+struct IetfVrfSignature<S: RingSuiteExt> {
 	output: ark_vrf::Output<S>,
 	proof: ark_vrf::ietf::Proof<S>,
 }
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-struct RingVrfSignature<S: RingSuite> {
+struct RingVrfSignature<S: RingSuiteExt> {
 	output: ark_vrf::Output<S>,
 	proof: ark_vrf::ring::Proof<S>,
 }
 
 #[inline(always)]
-fn make_alias<S: RingSuite>(output: &ark_vrf::Output<S>) -> Alias {
+fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 	Alias::try_from(&output.hash()[..32]).expect("Suite hash should be at least 32 bytes")
 }
 
 /// Generic ring VRF implementation parameterized over the ring suite.
 ///
 /// The curve data provider is obtained from `S::CurveData`.
-pub struct RingVrfVerifiable<S: RingSuiteTypes>(PhantomData<S>);
+pub struct RingVrfVerifiable<S: RingSuiteExt>(PhantomData<S>);
 
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableVrfInput";
 
-impl<S: RingSuiteTypes> RingVrfVerifiable<S> {
+impl<S: RingSuiteExt> RingVrfVerifiable<S> {
 	fn to_public_key(value: &S::PublicKeyBytes) -> Result<PublicKey<S>, ()> {
 		let pt =
 			ark_vrf::AffinePoint::<S>::deserialize_compressed(value.as_ref()).map_err(|_| ())?;
@@ -351,7 +353,7 @@ impl<S: RingSuiteTypes> RingVrfVerifiable<S> {
 	}
 }
 
-impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
+impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Members = MembersCommitment<S>;
 	type Intermediate = MembersSet<S>;
 	type Member = S::PublicKeyBytes;
