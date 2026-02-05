@@ -5,8 +5,6 @@ pub use ark_vrf;
 
 use ark_scale::ArkScale;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-#[cfg(any(feature = "std", feature = "builder-params"))]
-use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
 use ark_vrf::{
 	ring::{RingSuite, Verifier},
 	suites::bandersnatch,
@@ -17,10 +15,8 @@ use scale_info::TypeInfo;
 use super::*;
 
 /// The max ring that can be handled for both sign/verify for the given PCS domain size.
-const fn max_ring_size_from_pcs_domain_size(pcs_domain_size: usize) -> usize {
-	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<bandersnatch::BandersnatchSha512Ell2>(
-		pcs_domain_size,
-	)
+const fn max_ring_size_from_pcs_domain_size<S: RingSuite>(pcs_domain_size: usize) -> usize {
+	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(pcs_domain_size)
 }
 
 /// Concrete domain sizes for the PCS (Polynomial Commitment Scheme).
@@ -57,9 +53,15 @@ impl RingDomainSize {
 	}
 }
 
-impl Capacity for RingDomainSize {
+#[derive(Clone, Copy, Encode, Decode, TypeInfo, DecodeWithMemTracking)]
+pub struct RingSize<S: RingSuite> {
+	dom_size: RingDomainSize,
+	_phantom: PhantomData<S>,
+}
+
+impl<S: RingSuite> Capacity for RingSize<S> {
 	fn size(&self) -> usize {
-		max_ring_size_from_pcs_domain_size(self.pcs_domain_size())
+		max_ring_size_from_pcs_domain_size::<S>(self.dom_size.pcs_domain_size())
 	}
 }
 
@@ -86,6 +88,59 @@ pub trait RingCurveData {
 
 /// Ring data for suites using BLS12-381 pairing (e.g., Bandersnatch curves).
 pub struct Bls12_381RingData;
+
+#[cfg(feature = "std")]
+fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::RingProofParams {
+	use std::sync::OnceLock;
+	static CELL_11: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
+	static CELL_12: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
+	static CELL_16: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
+
+	let cell = match domain_size {
+		RingDomainSize::Domain11 => &CELL_11,
+		RingDomainSize::Domain12 => &CELL_12,
+		RingDomainSize::Domain16 => &CELL_16,
+	};
+	cell.get_or_init(|| ring_prover_params2(domain_size))
+}
+
+#[cfg(all(not(feature = "std"), feature = "no-std-prover"))]
+fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::RingProofParams {
+	use spin::Once;
+	static CELL_11: Once<bandersnatch::RingProofParams> = Once::new();
+	static CELL_12: Once<bandersnatch::RingProofParams> = Once::new();
+	static CELL_16: Once<bandersnatch::RingProofParams> = Once::new();
+
+	let cell = match domain_size {
+		RingDomainSize::Domain11 => &CELL_11,
+		RingDomainSize::Domain12 => &CELL_12,
+		RingDomainSize::Domain16 => &CELL_16,
+	};
+	cell.call_once(|| ring_prover_params2(domain_size))
+}
+
+#[cfg(any(feature = "std", feature = "no-std-prover"))]
+pub fn ring_prover_params2<S: RingSuiteTypes>(
+	domain_size: RingDomainSize,
+) -> ark_vrf::ring::RingProofParams<S> {
+	let pcs_params =
+		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(S::CurveData::srs_raw())
+			.expect("TODO");
+	let ring_size = max_ring_size_from_pcs_domain_size::<S>(domain_size.pcs_domain_size());
+	ark_vrf::ring::RingProofParams::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
+}
+
+/// Get ring builder params for the given domain size.
+/// Only available with the `builder-params` or `std` features.
+#[cfg(any(feature = "std", feature = "builder-params"))]
+pub fn ring_verifier_builder_params<S: RingSuite>(
+	domain_size: RingDomainSize,
+) -> ark_vrf::ring::RingBuilderPcsParams<S> {
+	use ark_vrf::ring::G1Affine;
+	let data = Bls12_381RingData::ring_builder_params(domain_size);
+	let inner = <Vec<G1Affine<S>>>::deserialize_uncompressed_unchecked(data).unwrap();
+	ark_vrf::ring::RingBuilderPcsParams::<S>(inner)
+}
 
 impl RingCurveData for Bls12_381RingData {
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
@@ -218,10 +273,10 @@ impl RingSuiteTypes for bandersnatch::BandersnatchSha512Ell2 {
 
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableVrfInput";
 
-/// A sequence of static chunks.
-/// Only available with the `builder-params` feature.
-#[cfg(any(feature = "std", feature = "builder-params"))]
-pub type RingBuilderParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
+// /// A sequence of static chunks.
+// /// Only available with the `builder-params` feature.
+// #[cfg(any(feature = "std", feature = "builder-params"))]
+// pub type RingBuilderParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
 macro_rules! impl_common_traits {
 	// Generic type version - size comes from RingSuiteTypes trait
@@ -267,61 +322,6 @@ macro_rules! impl_common_traits {
 
 		impl<S: $bound> DecodeWithMemTracking for $type_name<S> {}
 	};
-}
-
-#[cfg(feature = "std")]
-fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::RingProofParams {
-	use std::sync::OnceLock;
-	static CELL_11: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
-	static CELL_12: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
-	static CELL_16: OnceLock<bandersnatch::RingProofParams> = OnceLock::new();
-
-	let cell = match domain_size {
-		RingDomainSize::Domain11 => &CELL_11,
-		RingDomainSize::Domain12 => &CELL_12,
-		RingDomainSize::Domain16 => &CELL_16,
-	};
-
-	cell.get_or_init(|| {
-		let pcs_params = bandersnatch::PcsParams::deserialize_uncompressed_unchecked(
-			Bls12_381RingData::srs_raw(),
-		)
-		.unwrap();
-		bandersnatch::RingProofParams::from_pcs_params(domain_size.size(), pcs_params).unwrap()
-	})
-}
-
-#[cfg(all(not(feature = "std"), feature = "no-std-prover"))]
-fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::RingProofParams {
-	use spin::Once;
-	static CELL_11: Once<bandersnatch::RingProofParams> = Once::new();
-	static CELL_12: Once<bandersnatch::RingProofParams> = Once::new();
-	static CELL_16: Once<bandersnatch::RingProofParams> = Once::new();
-
-	let cell = match domain_size {
-		RingDomainSize::Domain11 => &CELL_11,
-		RingDomainSize::Domain12 => &CELL_12,
-		RingDomainSize::Domain16 => &CELL_16,
-	};
-
-	cell.call_once(|| {
-		let pcs_params = bandersnatch::PcsParams::deserialize_uncompressed_unchecked(
-			Bls12_381RingData::srs_raw(),
-		)
-		.unwrap();
-		bandersnatch::RingProofParams::from_pcs_params(domain_size.size(), pcs_params).unwrap()
-	})
-}
-
-/// Get ring builder params for the given domain size.
-/// Only available with the `builder-params` or `std` features.
-#[cfg(any(feature = "std", feature = "builder-params"))]
-pub fn ring_verifier_builder_params(domain_size: RingDomainSize) -> RingBuilderParams {
-	use ark_vrf::ring::G1Affine;
-	let data = Bls12_381RingData::ring_builder_params(domain_size);
-	let inner =
-		<Vec<G1Affine<BandersnatchSha512Ell2>>>::deserialize_uncompressed_unchecked(data).unwrap();
-	ark_vrf::ring::RingBuilderPcsParams::<BandersnatchSha512Ell2>(inner)
 }
 
 #[derive(CanonicalDeserialize, CanonicalSerialize)]
@@ -404,18 +404,18 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Member = S::EncodedPublicKey;
 	type Secret = ark_vrf::Secret<S>;
 	type Commitment = (
-		RingDomainSize,
+		Self::Capacity,
 		u32,
 		ArkScale<ark_vrf::ring::RingProverKey<S>>,
 	);
 	type Proof = S::RingProofBytes;
 	type Signature = S::SignatureBytes;
 	type StaticChunk = StaticChunk<S>;
-	type Capacity = RingDomainSize;
+	type Capacity = RingSize<S>;
 
-	fn start_members(capacity: RingDomainSize) -> Self::Intermediate {
+	fn start_members(capacity: Self::Capacity) -> Self::Intermediate {
 		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = S::CurveData::empty_ring_commitment(capacity);
+		let data = S::CurveData::empty_ring_commitment(capacity.dom_size);
 		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
 	}
 
@@ -453,7 +453,7 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn validate(
-		capacity: RingDomainSize,
+		capacity: Self::Capacity,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
@@ -523,7 +523,7 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 
 	#[cfg(any(feature = "std", feature = "no-std-prover"))]
 	fn open(
-		capacity: RingDomainSize,
+		capacity: Self::Capacity,
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -533,7 +533,7 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 		let member = Self::to_public_key(member)?;
 		let member_idx = pks.iter().position(|&m| m == member.0).ok_or(())?;
 		let member_idx = member_idx as u32;
-		let prover_key = S::ring_proof_params(capacity).prover_key(&pks[..]);
+		let prover_key = S::ring_proof_params(capacity.dom_size).prover_key(&pks[..]);
 		Ok((capacity, member_idx, prover_key.into()))
 	}
 
@@ -545,8 +545,8 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
 		use ark_vrf::ring::Prover;
-		let (domain_size, prover_idx, prover_key) = commitment;
-		let params = S::ring_proof_params(domain_size);
+		let (capacity, prover_idx, prover_key) = commitment;
+		let params = S::ring_proof_params(capacity.dom_size);
 		if prover_idx >= params.max_ring_size() as u32 {
 			return Err(());
 		}
