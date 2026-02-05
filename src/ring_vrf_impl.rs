@@ -123,9 +123,9 @@ fn ring_prover_params(domain_size: RingDomainSize) -> &'static bandersnatch::Rin
 pub fn ring_prover_params2<S: RingSuiteTypes>(
 	domain_size: RingDomainSize,
 ) -> ark_vrf::ring::RingProofParams<S> {
+	let data = S::CurveData::srs_raw();
 	let pcs_params =
-		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(S::CurveData::srs_raw())
-			.expect("TODO");
+		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap();
 	let ring_size = max_ring_size_from_pcs_domain_size::<S>(domain_size.pcs_domain_size());
 	ark_vrf::ring::RingProofParams::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
 }
@@ -133,13 +133,11 @@ pub fn ring_prover_params2<S: RingSuiteTypes>(
 /// Get ring builder params for the given domain size.
 /// Only available with the `builder-params` or `std` features.
 #[cfg(any(feature = "std", feature = "builder-params"))]
-pub fn ring_verifier_builder_params<S: RingSuite>(
+pub fn ring_verifier_builder_params<S: RingSuiteTypes>(
 	domain_size: RingDomainSize,
 ) -> ark_vrf::ring::RingBuilderPcsParams<S> {
-	use ark_vrf::ring::G1Affine;
-	let data = Bls12_381RingData::ring_builder_params(domain_size);
-	let inner = <Vec<G1Affine<S>>>::deserialize_uncompressed_unchecked(data).unwrap();
-	ark_vrf::ring::RingBuilderPcsParams::<S>(inner)
+	let data = S::CurveData::ring_builder_params(domain_size);
+	ark_vrf::ring::RingBuilderPcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap()
 }
 
 impl RingCurveData for Bls12_381RingData {
@@ -225,7 +223,7 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 	/// Encoded size of StaticChunk (G1 point).
 	const STATIC_CHUNK_SIZE: usize;
 
-	/// The curve data provider for this suite.
+	/// The curve static data provider for this suite.
 	type CurveData: RingCurveData;
 
 	/// Get cached ring proof params for this suite.
