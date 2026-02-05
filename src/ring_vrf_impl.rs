@@ -156,50 +156,20 @@ pub fn ring_verifier_builder_params<S: RingSuiteTypes>(
 	ark_vrf::ring::RingBuilderPcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap()
 }
 
+pub trait EncodedTypesBounds:
+	Clone + Eq + FullCodec + core::fmt::Debug + TypeInfo + MaxEncodedLen + AsRef<[u8]> + AsMut<[u8]>
+{
+	const ZERO: Self;
+}
+impl<const N: usize> EncodedTypesBounds for [u8; N] {
+	const ZERO: Self = [0; N];
+}
+
 /// Trait providing suite-specific byte array types for ring VRF operations.
 ///
 /// This trait defines the concrete array types used for serialized forms of
 /// public keys, proofs, and signatures. Each suite specifies its own sizes.
 pub trait RingSuiteTypes: RingSuite + 'static {
-	/// Byte array type for encoded public keys.
-	type EncodedPublicKey: Clone
-		+ Eq
-		+ PartialEq
-		+ Encode
-		+ Decode
-		+ scale::EncodeLike
-		+ core::fmt::Debug
-		+ TypeInfo
-		+ MaxEncodedLen
-		+ AsRef<[u8]>
-		+ AsMut<[u8]>
-		+ Default
-		+ DecodeWithMemTracking;
-
-	/// Byte array type for ring VRF proofs.
-	type RingProofBytes: Clone
-		+ Eq
-		+ PartialEq
-		+ Encode
-		+ Decode
-		+ scale::EncodeLike
-		+ core::fmt::Debug
-		+ TypeInfo
-		+ AsRef<[u8]>
-		+ AsMut<[u8]>;
-
-	/// Byte array type for plain VRF signatures.
-	type SignatureBytes: Clone
-		+ Eq
-		+ PartialEq
-		+ Encode
-		+ Decode
-		+ scale::EncodeLike
-		+ core::fmt::Debug
-		+ TypeInfo
-		+ AsRef<[u8]>
-		+ AsMut<[u8]>;
-
 	/// Encoded size of a public key.
 	const PUBLIC_KEY_SIZE: usize;
 	/// Encoded size of MembersSet (Intermediate).
@@ -209,6 +179,13 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 	/// Encoded size of StaticChunk (G1 point).
 	const STATIC_CHUNK_SIZE: usize;
 
+	/// Byte array type for encoded public keys.
+	type PublicKeyBytes: EncodedTypesBounds;
+	/// Byte array type for ring VRF proofs.
+	type RingProofBytes: EncodedTypesBounds;
+	/// Byte array type for plain VRF signatures.
+	type SignatureBytes: EncodedTypesBounds;
+
 	/// The curve static data provider for this suite.
 	type CurveData: RingCurveData;
 
@@ -217,23 +194,17 @@ pub trait RingSuiteTypes: RingSuite + 'static {
 	fn ring_proof_params(
 		domain_size: RingDomainSize,
 	) -> &'static ark_vrf::ring::RingProofParams<Self>;
-
-	/// Create a zero-initialized ring proof buffer.
-	fn zero_proof() -> Self::RingProofBytes;
-
-	/// Create a zero-initialized signature buffer.
-	fn zero_signature() -> Self::SignatureBytes;
 }
 
 impl RingSuiteTypes for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
-	type EncodedPublicKey = [u8; 32];
-	type RingProofBytes = [u8; 788];
-	type SignatureBytes = [u8; 96];
-
 	const PUBLIC_KEY_SIZE: usize = 32;
 	const MEMBERS_SET_SIZE: usize = 432;
 	const MEMBERS_COMMITMENT_SIZE: usize = 384;
 	const STATIC_CHUNK_SIZE: usize = 48;
+
+	type PublicKeyBytes = [u8; 32];
+	type RingProofBytes = [u8; 788];
+	type SignatureBytes = [u8; 96];
 
 	type CurveData = Bls12_381RingData;
 
@@ -256,24 +227,7 @@ impl RingSuiteTypes for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 			make_ring_prover_params::<bandersnatch::BandersnatchSha512Ell2>(domain_size)
 		})
 	}
-
-	fn zero_proof() -> Self::RingProofBytes {
-		[0u8; 788]
-	}
-
-	fn zero_signature() -> Self::SignatureBytes {
-		[0u8; 96]
-	}
 }
-
-// ---------------------------------------------------------------------------
-
-const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableVrfInput";
-
-// /// A sequence of static chunks.
-// /// Only available with the `builder-params` feature.
-// #[cfg(any(feature = "std", feature = "builder-params"))]
-// pub type RingBuilderParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
 macro_rules! impl_common_traits {
 	// Generic type version - size comes from RingSuiteTypes trait
@@ -379,15 +333,17 @@ fn make_alias<S: RingSuite>(output: &ark_vrf::Output<S>) -> Alias {
 /// The curve data provider is obtained from `S::CurveData`.
 pub struct RingVrfVerifiable<S: RingSuiteTypes>(PhantomData<S>);
 
+const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableVrfInput";
+
 impl<S: RingSuiteTypes> RingVrfVerifiable<S> {
-	fn to_public_key(value: &S::EncodedPublicKey) -> Result<PublicKey<S>, ()> {
+	fn to_public_key(value: &S::PublicKeyBytes) -> Result<PublicKey<S>, ()> {
 		let pt =
 			ark_vrf::AffinePoint::<S>::deserialize_compressed(value.as_ref()).map_err(|_| ())?;
 		Ok(PublicKey(pt))
 	}
 
-	fn to_encoded_public_key(value: &PublicKey<S>) -> S::EncodedPublicKey {
-		let mut bytes = S::EncodedPublicKey::default();
+	fn to_encoded_public_key(value: &PublicKey<S>) -> S::PublicKeyBytes {
+		let mut bytes = S::PublicKeyBytes::ZERO;
 		value.using_encoded(|encoded| {
 			bytes.as_mut().copy_from_slice(encoded);
 		});
@@ -398,7 +354,7 @@ impl<S: RingSuiteTypes> RingVrfVerifiable<S> {
 impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Members = MembersCommitment<S>;
 	type Intermediate = MembersSet<S>;
-	type Member = S::EncodedPublicKey;
+	type Member = S::PublicKeyBytes;
 	type Secret = ark_vrf::Secret<S>;
 	type Commitment = (
 		Self::Capacity,
@@ -466,8 +422,8 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 		let input_msg = [VRF_INPUT_DOMAIN, context].concat();
 		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 
-		let signature =
-			RingVrfSignature::<S>::deserialize_compressed(proof.as_ref()).map_err(|_| ())?;
+		let signature = RingVrfSignature::<S>::deserialize_compressed_unchecked(proof.as_ref())
+			.map_err(|_| ())?;
 
 		ark_vrf::Public::<S>::verify(
 			input,
@@ -490,7 +446,7 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 		let proof = secret.prove(input, output, b"");
 		let signature = IetfVrfSignature::<S> { output, proof };
 
-		let mut raw = S::zero_signature();
+		let mut raw = S::SignatureBytes::ZERO;
 		signature
 			.serialize_compressed(raw.as_mut())
 			.map_err(|_| ())?;
@@ -503,7 +459,8 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 		member: &Self::Member,
 	) -> bool {
 		use ark_vrf::ietf::Verifier;
-		let Ok(signature) = IetfVrfSignature::<S>::deserialize_compressed(signature.as_ref())
+		let Ok(signature) =
+			IetfVrfSignature::<S>::deserialize_compressed_unchecked(signature.as_ref())
 		else {
 			return false;
 		};
@@ -562,7 +519,7 @@ impl<S: RingSuiteTypes> GenerateVerifiable for RingVrfVerifiable<S> {
 			proof,
 		};
 
-		let mut buf = S::zero_proof();
+		let mut buf = S::RingProofBytes::ZERO;
 		signature
 			.serialize_compressed(buf.as_mut())
 			.map_err(|_| ())?;
