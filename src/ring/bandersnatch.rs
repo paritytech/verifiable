@@ -52,7 +52,7 @@ mod tests {
 	use ark_vrf::ring::SrsLookup;
 
 	use super::*;
-	use crate::GenerateVerifiable;
+	use crate::{ring::RingSize, Capacity, GenerateVerifiable};
 
 	// Type aliases for Bandersnatch-specific generic types
 	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
@@ -97,6 +97,19 @@ mod tests {
 		let secret = BandersnatchVrfVerifiable::new_secret([42u8; 32]);
 		let valid_member = BandersnatchVrfVerifiable::member_from_secret(&secret);
 		assert!(BandersnatchVrfVerifiable::is_member_valid(&valid_member));
+	}
+
+	#[test]
+	fn ring_size_check() {
+		const DOM_TO_RING_SIZE_MAP: [(RingDomainSize, usize); 3] = [
+			(RingDomainSize::Domain11, 255),
+			(RingDomainSize::Domain12, 767),
+			(RingDomainSize::Domain16, 16127),
+		];
+		for (dom_size, exp_ring_size) in DOM_TO_RING_SIZE_MAP {
+			let ring_size = RingSize::<BandersnatchSha512Ell2>::from(dom_size);
+			assert_eq!(ring_size.size(), exp_ring_size);
+		}
 	}
 
 	/// Verify that the size constants in `RingSuiteExt` match actual serialized sizes.
