@@ -56,6 +56,11 @@ impl RingDomainSize {
 		1 << self.as_power()
 	}
 
+	/// Returns the maximum ring size that can be handled for both sign/verify for a domain size.
+	pub const fn max_ring_size(&self) -> usize {
+		max_ring_size_from_pcs_domain_size(self.pcs_domain_size())
+	}
+
 	/// All available domain sizes.
 	pub const ALL: [RingDomainSize; 3] = [
 		RingDomainSize::Domain11,
@@ -66,7 +71,7 @@ impl RingDomainSize {
 
 impl Capacity for RingDomainSize {
 	fn size(&self) -> usize {
-		max_ring_size_from_pcs_domain_size(self.pcs_domain_size())
+		self.max_ring_size()
 	}
 }
 
