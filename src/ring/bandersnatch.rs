@@ -1,16 +1,16 @@
 use crate::ring::{Bls12_381RingData, RingSuiteExt, RingVrfVerifiable};
 use ark_vrf::suites::bandersnatch::{BandersnatchSha512Ell2, RingProofParams};
 
-#[cfg(any(feature = "std", feature = "no-std-prover"))]
+#[cfg(feature = "prover")]
 use crate::ring::{make_ring_prover_params, RingDomainSize, RingProofParamsCache};
 
 /// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
 pub type BandersnatchVrfVerifiable = RingVrfVerifiable<BandersnatchSha512Ell2>;
 
-#[cfg(any(feature = "std", feature = "no-std-prover"))]
+#[cfg(feature = "prover")]
 pub struct BandersnatchParamsCache;
 
-#[cfg(any(feature = "std", feature = "no-std-prover"))]
+#[cfg(feature = "prover")]
 impl RingProofParamsCache<BandersnatchSha512Ell2> for BandersnatchParamsCache {
 	type Handle = &'static ark_vrf::ring::RingProofParams<BandersnatchSha512Ell2>;
 
@@ -41,7 +41,7 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	type RingProofBytes = [u8; Self::RING_PROOF_SIZE];
 	type SignatureBytes = [u8; Self::SIGNATURE_SIZE];
 
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	type ParamsCache = BandersnatchParamsCache;
 }
 

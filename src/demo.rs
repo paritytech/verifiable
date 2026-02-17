@@ -58,7 +58,7 @@ impl GenerateVerifiable for Trivial {
 		secret.clone()
 	}
 
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	fn open(
 		_capacity: (),
 		member: &Self::Member,
@@ -71,7 +71,7 @@ impl GenerateVerifiable for Trivial {
 		Ok((member.clone(), set))
 	}
 
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	fn create(
 		(member, _): Self::Commitment,
 		secret: &Self::Secret,
@@ -168,7 +168,7 @@ impl GenerateVerifiable for Simple {
 		pair.public.to_bytes()
 	}
 
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	fn open(
 		_capacity: (),
 		member: &Self::Member,
@@ -181,7 +181,7 @@ impl GenerateVerifiable for Simple {
 		Ok((member.clone(), set))
 	}
 
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	fn create(
 		(member, _): Self::Commitment,
 		secret: &Self::Secret,
@@ -248,10 +248,7 @@ impl GenerateVerifiable for Simple {
 mod tests {
 	use super::*;
 
-	#[cfg(all(
-		feature = "schnorrkel",
-		any(feature = "std", feature = "no-std-prover")
-	))]
+	#[cfg(all(feature = "schnorrkel", feature = "prover"))]
 	#[test]
 	fn simple_works() {
 		let alice_sec = <Simple as GenerateVerifiable>::new_secret([0u8; 32]);

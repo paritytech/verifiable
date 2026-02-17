@@ -32,6 +32,7 @@ path = "utils/generate_test_keys.rs"
 [features]
 default = ["std"]
 std = [
+    "prover",
     "bounded-collections/std",
     "parity-scale-codec/std",
     "scale-info/std",
@@ -45,9 +46,12 @@ std = [
 # Disable this feature to reduce library size in production environments
 # that only need to validate proofs (not build new ring commitments).
 builder-params = []
-schnorrkel = ["dep:schnorrkel"]
+# Enables ring proof generation (prover) functionality.
+prover = []
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
+    "prover",
     "ark-vrf/test-vectors",
 ]
+schnorrkel = ["dep:schnorrkel"]

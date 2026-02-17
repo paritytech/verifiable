@@ -122,7 +122,7 @@ pub trait GenerateVerifiable {
 	///
 	/// **WARNING**: This function may panic if called from on-chain or an environment not
 	/// implementing the functionality.
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	fn open(
 		capacity: Self::Capacity,
 		member: &Self::Member,
@@ -144,7 +144,7 @@ pub trait GenerateVerifiable {
 	///
 	/// **WARNING**: This function may panic if called from on-chain or an environment not
 	/// implementing the functionality.
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	fn create(
 		commitment: Self::Commitment,
 		secret: &Self::Secret,
@@ -208,7 +208,7 @@ pub struct Receipt<Gen: GenerateVerifiable> {
 }
 
 impl<Gen: GenerateVerifiable> Receipt<Gen> {
-	#[cfg(any(feature = "std", feature = "no-std-prover"))]
+	#[cfg(feature = "prover")]
 	pub fn create<'a>(
 		capacity: Gen::Capacity,
 		secret: &Gen::Secret,
