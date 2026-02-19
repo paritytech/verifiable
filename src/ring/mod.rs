@@ -324,7 +324,11 @@ struct RingVrfSignature<S: RingSuiteExt> {
 
 #[inline(always)]
 fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
-	Alias::try_from(&output.hash()[..32]).expect("Suite hash should be at least 32 bytes")
+	output
+		.hash()
+		.get(..32)
+		.and_then(|raw| raw.try_into().ok())
+		.expect("Suite hash should be at least 32 bytes")
 }
 
 /// Generic ring VRF implementation parameterized over the ring suite.
