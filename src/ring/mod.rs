@@ -76,8 +76,8 @@ impl<S: RingSuiteExt> Capacity for RingSize<S> {
 /// Trait for providing pairing-curve-specific ring data.
 ///
 /// All RingSuites that use the same pairing curve can share the same data provider.
-/// For example, all suites using BLS12-381 (like Bandersnatch) use `Bls12_381RingData`.
-pub trait RingCurveData {
+/// For example, all suites using BLS12-381 (like Bandersnatch) use `Bls12_381Params`.
+pub trait RingCurveParams {
 	/// Raw SRS data (powers of tau).
 	#[cfg(feature = "prover")]
 	fn srs_raw() -> &'static [u8];
@@ -91,9 +91,9 @@ pub trait RingCurveData {
 }
 
 /// Ring data for suites using BLS12-381 pairing (e.g., Bandersnatch curves).
-pub struct Bls12_381RingData;
+pub struct Bls12_381Params;
 
-impl RingCurveData for Bls12_381RingData {
+impl RingCurveParams for Bls12_381Params {
 	#[cfg(feature = "prover")]
 	fn srs_raw() -> &'static [u8] {
 		include_bytes!("data/bls12-381/srs-uncompressed.bin")
@@ -133,7 +133,7 @@ const fn max_ring_size_from_pcs_domain_size<S: RingSuiteExt>(pcs_domain_size: us
 pub fn make_ring_prover_params<S: RingSuiteExt>(
 	domain_size: RingDomainSize,
 ) -> ark_vrf::ring::RingProofParams<S> {
-	let data = S::CurveData::srs_raw();
+	let data = S::CurveParams::srs_raw();
 	let pcs_params =
 		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap();
 	let ring_size = max_ring_size_from_pcs_domain_size::<S>(domain_size.pcs_domain_size());
@@ -146,7 +146,7 @@ pub fn make_ring_prover_params<S: RingSuiteExt>(
 pub fn ring_verifier_builder_params<S: RingSuiteExt>(
 	domain_size: RingDomainSize,
 ) -> ark_vrf::ring::RingBuilderPcsParams<S> {
-	let data = S::CurveData::ring_builder_params(domain_size);
+	let data = S::CurveParams::ring_builder_params(domain_size);
 	ark_vrf::ring::RingBuilderPcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap()
 }
 
@@ -218,7 +218,7 @@ pub trait RingSuiteExt: RingSuite + 'static {
 	type SignatureBytes: EncodedTypesBounds;
 
 	/// The curve static data provider for this suite.
-	type CurveData: RingCurveData;
+	type CurveParams: RingCurveParams;
 
 	/// Cache strategy for ring proof params.
 	///
@@ -333,7 +333,7 @@ fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 
 /// Generic ring VRF implementation parameterized over the ring suite.
 ///
-/// The curve data provider is obtained from `S::CurveData`.
+/// The curve params provider is obtained from `S::CurveParams`.
 pub struct RingVrfVerifiable<S: RingSuiteExt>(PhantomData<S>);
 
 const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableVrfInput";
@@ -371,7 +371,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 	fn start_members(capacity: Self::Capacity) -> Self::Intermediate {
 		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = S::CurveData::empty_ring_commitment(capacity.dom_size);
+		let data = S::CurveParams::empty_ring_commitment(capacity.dom_size);
 		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
 	}
 

@@ -1,4 +1,4 @@
-use crate::ring::{Bls12_381RingData, RingSuiteExt, RingVrfVerifiable};
+use crate::ring::{Bls12_381Params, RingSuiteExt, RingVrfVerifiable};
 use ark_vrf::suites::bandersnatch::{BandersnatchSha512Ell2, RingProofParams};
 
 #[cfg(feature = "prover")]
@@ -35,7 +35,7 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	const RING_PROOF_SIZE: usize = 788;
 	const SIGNATURE_SIZE: usize = 96;
 
-	type CurveData = Bls12_381RingData;
+	type CurveParams = Bls12_381Params;
 
 	type PublicKeyBytes = [u8; Self::PUBLIC_KEY_SIZE];
 	type RingProofBytes = [u8; Self::RING_PROOF_SIZE];
