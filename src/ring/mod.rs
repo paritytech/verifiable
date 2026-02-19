@@ -176,7 +176,15 @@ impl<S: RingSuiteExt> RingProofParamsCache<S> for NullCache {
 }
 
 pub trait EncodedTypesBounds:
-	Clone + Eq + FullCodec + core::fmt::Debug + TypeInfo + MaxEncodedLen + AsRef<[u8]> + AsMut<[u8]>
+	Clone
+	+ Eq
+	+ FullCodec
+	+ DecodeWithMemTracking
+	+ core::fmt::Debug
+	+ TypeInfo
+	+ MaxEncodedLen
+	+ AsRef<[u8]>
+	+ AsMut<[u8]>
 {
 	const ZERO: Self;
 }
