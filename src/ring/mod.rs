@@ -279,7 +279,7 @@ macro_rules! impl_common_traits {
 
 #[derive(CanonicalDeserialize, CanonicalSerialize)]
 #[derive_where::derive_where(Clone)]
-pub struct MembersSet<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKeyBuilder<S>);
+pub struct MembersSet<S: RingSuiteExt>(pub(crate) ark_vrf::ring::VerifierKeyBuilder<S>);
 
 impl_common_traits!(MembersSet<S: RingSuiteExt>, S::MEMBERS_SET_SIZE);
 
@@ -473,7 +473,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let Ok(member) = Self::to_public_key(member) else {
 			return false;
 		};
-		let public = ark_vrf::Public::<S>::from(member.0);
+		let public = ark_vrf::Public(member.0);
 		public
 			.verify(input, signature.output, b"", &signature.proof)
 			.is_ok()
