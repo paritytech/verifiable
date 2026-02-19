@@ -7,9 +7,7 @@ authors = ["Parity Technologies <admin@parity.io>"]
 repository = "https://github.com/paritytech/verifiable.git"
 license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 
-exclude = ["src/ring-data/zcash-srs-2-16-uncompressed.bin"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+exclude = ["src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin"]
 
 [dependencies]
 derive-where = "1.2"
@@ -19,8 +17,8 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 schnorrkel = { version = "0.11.5", default-features = false, optional = true }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-ark-vrf = { version = "0.1.0", default-features = false, features = ["bandersnatch", "ring"] }
-spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
+ark-vrf = { version = "0.1.1", default-features = false, features = ["bandersnatch", "ring"] }
+spin = { version = "0.9", default-features = false, features = ["once"] }
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["getrandom"] }
@@ -34,6 +32,7 @@ path = "utils/generate_test_keys.rs"
 [features]
 default = ["std"]
 std = [
+    "prover",
     "bounded-collections/std",
     "parity-scale-codec/std",
     "scale-info/std",
@@ -47,10 +46,12 @@ std = [
 # Disable this feature to reduce library size in production environments
 # that only need to validate proofs (not build new ring commitments).
 builder-params = []
-schnorrkel = ["dep:schnorrkel"]
+# Enables ring proof generation (prover) functionality.
+prover = []
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
-    "spin",
+    "prover",
     "ark-vrf/test-vectors",
 ]
+schnorrkel = ["dep:schnorrkel"]
