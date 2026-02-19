@@ -28,6 +28,8 @@ impl RingProofParamsCache<BandersnatchSha512Ell2> for BandersnatchParamsCache {
 }
 
 impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
+	const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
+
 	const PUBLIC_KEY_SIZE: usize = 32;
 	const MEMBERS_SET_SIZE: usize = 432;
 	const MEMBERS_COMMITMENT_SIZE: usize = 384;
