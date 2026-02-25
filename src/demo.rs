@@ -133,6 +133,7 @@ impl GenerateVerifiable for Simple {
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
 	type Signature = [u8; 64];
+
 	type StaticChunk = ();
 	type Capacity = ();
 

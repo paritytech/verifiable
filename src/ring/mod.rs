@@ -13,6 +13,9 @@ use super::*;
 
 pub mod bandersnatch;
 
+pub const COMPRESSED_POINT_SIZE: usize = 32;
+pub const RING_PROOF_SERIALIZED_SIZE: usize = 752;
+
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
 /// This determines the maximum ring size that can be supported for a ring suite.
@@ -439,6 +442,33 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		.map_err(|_| ())?;
 
 		Ok(make_alias(&signature.output))
+	}
+
+	fn batch_validate(
+		capacity: Self::Capacity,
+		members: &Self::Members,
+		context: &[u8],
+		proofs: &[BatchProofItem<Self::Proof>],
+	) -> Result<Vec<Alias>, ()> {
+		let verifier = ark_vrf::ring::RingProofParams::<S>::verifier_no_context(
+			members.0.clone(),
+			capacity.size(),
+		);
+
+		let mut aliases = Vec::with_capacity(proofs.len());
+		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(verifier);
+		let input_msg = [S::VRF_INPUT_DOMAIN, context].concat();
+		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
+		for BatchProofItem { proof, message } in proofs {
+			let signature = RingVrfSignature::<S>::deserialize_compressed_unchecked(proof.as_ref())
+				.map_err(|_| ())?;
+			aliases.push(make_alias(&signature.output));
+			batch_verifier.push(input, signature.output, message, &signature.proof);
+		}
+		if batch_verifier.verify().is_ok() {
+			return Ok(aliases);
+		}
+		Err(())
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
