@@ -25,7 +25,6 @@ impl GenerateVerifiable for Trivial {
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = [u8; 32];
 	type Signature = [u8; 32];
-	type AccStep = ();
 	type StaticChunk = ();
 	type Capacity = ();
 
@@ -57,15 +56,6 @@ impl GenerateVerifiable for Trivial {
 
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
 		secret.clone()
-	}
-
-	fn batch_step(
-		_proof: &Self::Proof,
-		_members: &Self::Members,
-		_context: &[u8],
-		_message: &[u8],
-	) -> Self::AccStep {
-		()
 	}
 
 	#[cfg(feature = "prover")]
@@ -143,7 +133,7 @@ impl GenerateVerifiable for Simple {
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
 	type Signature = [u8; 64];
-	type AccStep = ();
+
 	type StaticChunk = ();
 	type Capacity = ();
 
@@ -177,15 +167,6 @@ impl GenerateVerifiable for Simple {
 		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
 		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
 		pair.public.to_bytes()
-	}
-
-	fn batch_step(
-		_proof: &Self::Proof,
-		_members: &Self::Members,
-		_context: &[u8],
-		_message: &[u8],
-	) -> Self::AccStep {
-		()
 	}
 
 	#[cfg(feature = "prover")]
