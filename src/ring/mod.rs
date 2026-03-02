@@ -13,9 +13,6 @@ use super::*;
 
 pub mod bandersnatch;
 
-pub const COMPRESSED_POINT_SIZE: usize = 32;
-pub const RING_PROOF_SERIALIZED_SIZE: usize = 752;
-
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
 /// This determines the maximum ring size that can be supported for a ring suite.
