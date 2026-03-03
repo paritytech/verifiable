@@ -31,9 +31,9 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	const VRF_INPUT_DOMAIN: &[u8] = b"VerifiableBandersnatchVrfInput";
 
 	const PUBLIC_KEY_SIZE: usize = 32;
-	const MEMBERS_SET_SIZE: usize = 432;
-	const MEMBERS_COMMITMENT_SIZE: usize = 384;
-	const STATIC_CHUNK_SIZE: usize = 48;
+	const MEMBERS_SET_SIZE: usize = 848;
+	const MEMBERS_COMMITMENT_SIZE: usize = 768;
+	const STATIC_CHUNK_SIZE: usize = 96;
 	const RING_PROOF_SIZE: usize = 788;
 	const SIGNATURE_SIZE: usize = 96;
 
@@ -59,7 +59,6 @@ mod tests {
 	// Type aliases for Bandersnatch-specific generic types
 	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
 	pub type MembersCommitment = crate::ring::MembersCommitment<BandersnatchSha512Ell2>;
-	pub type PublicKey = crate::ring::PublicKey<BandersnatchSha512Ell2>;
 	pub type StaticChunk = crate::ring::StaticChunk<BandersnatchSha512Ell2>;
 
 	type RingBuilderPcsParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
@@ -122,28 +121,27 @@ mod tests {
 		// PUBLIC_KEY_SIZE
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let internal = BandersnatchVrfVerifiable::to_public_key(&public).unwrap();
+		let internal = BandersnatchVrfVerifiable::decode_public_key(&public).unwrap();
 		assert_eq!(internal.compressed_size(), S::PUBLIC_KEY_SIZE);
-		assert_eq!(PublicKey::max_encoded_len(), S::PUBLIC_KEY_SIZE);
 
-		// MEMBERS_SET_SIZE
+		// MEMBERS_SET_SIZE (uncompressed, TRUSTED_SOURCE encoding)
 		let members_set = BandersnatchVrfVerifiable::start_members(RingDomainSize::Domain11.into());
-		assert_eq!(members_set.compressed_size(), S::MEMBERS_SET_SIZE);
+		assert_eq!(members_set.uncompressed_size(), S::MEMBERS_SET_SIZE);
 		assert_eq!(MembersSet::max_encoded_len(), S::MEMBERS_SET_SIZE);
 
-		// MEMBERS_COMMITMENT_SIZE
+		// MEMBERS_COMMITMENT_SIZE (uncompressed, TRUSTED_SOURCE encoding)
 		let commitment = BandersnatchVrfVerifiable::finish_members(members_set);
-		assert_eq!(commitment.compressed_size(), S::MEMBERS_COMMITMENT_SIZE);
+		assert_eq!(commitment.uncompressed_size(), S::MEMBERS_COMMITMENT_SIZE);
 		assert_eq!(
 			MembersCommitment::max_encoded_len(),
 			S::MEMBERS_COMMITMENT_SIZE
 		);
 
-		// STATIC_CHUNK_SIZE
+		// STATIC_CHUNK_SIZE (uncompressed, TRUSTED_SOURCE encoding)
 		let (_, builder_params) = start_members_from_params(RingDomainSize::Domain11);
 		let chunks: Vec<_> = (&builder_params).lookup(0..1).unwrap();
 		let chunk: StaticChunk = crate::ring::StaticChunk(chunks[0]);
-		assert_eq!(chunk.compressed_size(), S::STATIC_CHUNK_SIZE);
+		assert_eq!(chunk.uncompressed_size(), S::STATIC_CHUNK_SIZE);
 		assert_eq!(StaticChunk::max_encoded_len(), S::STATIC_CHUNK_SIZE);
 
 		// SIGNATURE_SIZE
@@ -184,7 +182,6 @@ mod builder_tests {
 
 	use tests::{
 		bandersnatch_ring_prover_params, start_members_from_params, MembersCommitment, MembersSet,
-		PublicKey,
 	};
 
 	pub type RingSize = crate::ring::RingSize<BandersnatchSha512Ell2>;

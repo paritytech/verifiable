@@ -13,6 +13,14 @@ use super::*;
 
 pub mod bandersnatch;
 
+/// Encoding mode for types that are constructed internally from trusted sources
+/// (e.g. on-chain state, locally built commitments) and do not need compression
+/// or validation during SCALE codec round-trips.
+///
+/// Equivalent to `ark_scale::HOST_CALL`: `(Compress::No, Validate::No)`.
+const TRUSTED_SOURCE: ark_scale::Usage =
+	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::No);
+
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
 /// This determines the maximum ring size that can be supported for a ring suite.
@@ -232,14 +240,54 @@ pub trait RingSuiteExt: RingSuite + 'static {
 }
 
 macro_rules! impl_common_traits {
-	// Generic type version - size comes from RingSuiteTypes trait
 	($type_name:ident<S: $bound:path>, $size_expr:expr) => {
 		impl<S: $bound> Decode for $type_name<S> {
-			ark_scale::impl_decode_via_ark!();
+			fn decode<I: ark_scale::scale::Input>(
+				input: &mut I,
+			) -> Result<Self, ark_scale::scale::Error> {
+				let a: ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> =
+					<ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> as ark_scale::scale::Decode>::decode(
+						input,
+					)?;
+				Ok(a.0)
+			}
+
+			fn skip<I: ark_scale::scale::Input>(
+				input: &mut I,
+			) -> Result<(), ark_scale::scale::Error> {
+				<ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> as ark_scale::scale::Decode>::skip(input)
+			}
+
+			fn encoded_fixed_size() -> Option<usize> {
+				<ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> as ark_scale::scale::Decode>::encoded_fixed_size()
+			}
 		}
 
 		impl<S: $bound> Encode for $type_name<S> {
-			ark_scale::impl_encode_via_ark!();
+			fn size_hint(&self) -> usize {
+				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				a.size_hint()
+			}
+
+			fn encode_to<O: ark_scale::scale::Output + ?Sized>(&self, dest: &mut O) {
+				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				a.encode_to(dest)
+			}
+
+			fn encode(&self) -> alloc::vec::Vec<u8> {
+				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				a.encode()
+			}
+
+			fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
+				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				a.using_encoded(f)
+			}
+
+			fn encoded_size(&self) -> usize {
+				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				a.encoded_size()
+			}
 		}
 
 		impl<S: $bound> scale::EncodeLike for $type_name<S> {}
@@ -305,7 +353,7 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersCommitment<S> {
 #[derive_where::derive_where(Clone, Debug)]
 pub struct PublicKey<S: RingSuiteExt>(pub(crate) ark_vrf::AffinePoint<S>);
 
-impl_common_traits!(PublicKey<S: RingSuiteExt>, S::PUBLIC_KEY_SIZE);
+impl_common_traits!(PublicKey<S: RingSuiteExt>, S::PUBLIC_KEY_SIZE, ark_scale::WIRE);
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 #[derive_where::derive_where(Clone, Debug)]
