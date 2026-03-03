@@ -33,6 +33,12 @@ pub type Alias = [u8; 32];
 /// Entropy supplied for the creation of a secret key.
 pub type Entropy = [u8; 32];
 
+#[derive(Clone)]
+pub struct BatchProofItem<Proof> {
+	pub proof: Proof,
+	pub message: Vec<u8>,
+}
+
 // The trait. This (alone) must be implemented in its entirely by the Ring-VRF.
 
 /// Trait allowing cryptographic proof of membership of a set with known members under multiple
@@ -185,6 +191,17 @@ pub trait GenerateVerifiable {
 		_context: &[u8],
 		_message: &[u8],
 	) -> Result<Alias, ()> {
+		Err(())
+	}
+
+	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
+	/// in order of input.
+	fn batch_validate(
+		_capacity: Self::Capacity,
+		_members: &Self::Members,
+		_context: &[u8],
+		_proofs: &[BatchProofItem<Self::Proof>],
+	) -> Result<Vec<Alias>, ()> {
 		Err(())
 	}
 
