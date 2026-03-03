@@ -50,7 +50,7 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 #[cfg(test)]
 mod tests {
 	use ark_scale::MaxEncodedLen;
-	use ark_serialize::CanonicalSerialize;
+	use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 	use ark_vrf::ring::SrsLookup;
 
 	use super::*;
@@ -121,7 +121,7 @@ mod tests {
 		// PUBLIC_KEY_SIZE
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let internal = BandersnatchVrfVerifiable::decode_public_key(&public).unwrap();
+		let internal = crate::ring::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(public.as_ref()).unwrap();
 		assert_eq!(internal.compressed_size(), S::PUBLIC_KEY_SIZE);
 
 		// MEMBERS_SET_SIZE (uncompressed, TRUSTED_SOURCE encoding)
@@ -176,7 +176,7 @@ mod builder_tests {
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
-	use ark_serialize::CanonicalSerialize;
+	use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 	use ark_vrf::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
 	use parity_scale_codec::Encode;
 
@@ -324,15 +324,15 @@ mod builder_tests {
 		let ring_size = domain_size.into();
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let internal = BandersnatchVrfVerifiable::to_public_key(&public).unwrap();
-		assert_eq!(internal.compressed_size(), PublicKey::max_encoded_len());
+		let internal = crate::ring::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(public.as_ref()).unwrap();
+		assert_eq!(internal.compressed_size(), <BandersnatchSha512Ell2 as RingSuiteExt>::PUBLIC_KEY_SIZE);
 
 		let members = BandersnatchVrfVerifiable::start_members(ring_size);
-		assert_eq!(members.compressed_size(), MembersSet::max_encoded_len());
+		assert_eq!(members.uncompressed_size(), MembersSet::max_encoded_len());
 
 		let commitment = BandersnatchVrfVerifiable::finish_members(members);
 		assert_eq!(
-			commitment.compressed_size(),
+			commitment.uncompressed_size(),
 			MembersCommitment::max_encoded_len()
 		);
 	});
@@ -496,7 +496,7 @@ mod builder_tests {
 		println!("* Open: {} ms", (Instant::now() - start).as_millis());
 		println!("  Commitment size: {} bytes", commitment.encode().len());
 
-		let secret = BandersnatchVrfVerifiable::new_secret([commitment.1 as u8; 32]);
+		let secret = BandersnatchVrfVerifiable::new_secret([commitment.prover_idx as u8; 32]);
 		let start = Instant::now();
 		let (proof, alias) =
 			BandersnatchVrfVerifiable::create(commitment, &secret, context, message).unwrap();
