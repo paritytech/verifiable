@@ -74,12 +74,17 @@ pub trait GenerateVerifiable {
 	///
 	/// This is not envisioned to be used on-chain.
 	type Commitment: FullCodec;
-	/// A proof which can be verified.
+	/// A proof of membership in a group, verifiable against `Members`.
+	///
+	/// Created via the two-step `open`/`create` flow. The verifier learns only the
+	/// context-specific `Alias` and the message, not which `Member` produced it.
 	///
 	/// This is expected to be passed on-chain as a parameter, but never stored.
 	type Proof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
-	/// A signature, creatable from a `Secret` for a message and which can be verified as valid
-	/// with respect to the corresponding `Member`.
+	/// A signature attributable to a specific `Member`, verifiable against that member's
+	/// public key.
+	///
+	/// Created via `sign`, verified via `verify_signature`.
 	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
