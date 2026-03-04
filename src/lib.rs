@@ -36,6 +36,7 @@ pub type Entropy = [u8; 32];
 #[derive(Clone)]
 pub struct BatchProofItem<Proof> {
 	pub proof: Proof,
+	pub context: Vec<u8>,
 	pub message: Vec<u8>,
 }
 
@@ -204,7 +205,6 @@ pub trait GenerateVerifiable {
 	fn batch_validate(
 		_capacity: Self::Capacity,
 		_members: &Self::Members,
-		_context: &[u8],
 		_proofs: &[BatchProofItem<Self::Proof>],
 	) -> Result<Vec<Alias>, ()> {
 		Err(())
