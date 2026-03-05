@@ -786,7 +786,7 @@ mod builder_tests {
 		let mut wrong_ctx_items = batch_items.clone();
 		wrong_ctx_items.push(BatchProofItem {
 			proof: wrong_ctx_proof,
-			context: wrong_context.to_vec(),
+			context: context.to_vec(),
 			message: b"some message".to_vec(),
 		});
 
