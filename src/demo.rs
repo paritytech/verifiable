@@ -259,11 +259,9 @@ mod tests {
 		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
 		let mut inter = <Simple as GenerateVerifiable>::start_members(());
-		<Simple as GenerateVerifiable>::push_members(
-			&mut inter,
-			[alice].into_iter(),
-			|_| Ok(alloc::vec![()]),
-		)
+		<Simple as GenerateVerifiable>::push_members(&mut inter, [alice].into_iter(), |_| {
+			Ok(alloc::vec![()])
+		})
 		.unwrap();
 		<Simple as GenerateVerifiable>::push_members(&mut inter, [bob].into_iter(), |_| {
 			Ok(alloc::vec![()])

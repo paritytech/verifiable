@@ -382,14 +382,9 @@ mod builder_tests {
 		.unwrap();
 		BandersnatchVrfVerifiable::push_members(&mut inter2, [alice].into_iter(), get_many)
 			.unwrap();
-		BandersnatchVrfVerifiable::push_members(&mut inter2, [bob].into_iter(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter2, [bob].into_iter(), get_many).unwrap();
+		BandersnatchVrfVerifiable::push_members(&mut inter2, [charlie].into_iter(), get_many)
 			.unwrap();
-		BandersnatchVrfVerifiable::push_members(
-			&mut inter2,
-			[charlie].into_iter(),
-			get_many,
-		)
-		.unwrap();
 		assert_eq!(inter1, inter2);
 
 		let members1 = BandersnatchVrfVerifiable::finish_members(inter1);
@@ -447,24 +442,15 @@ mod builder_tests {
 		// Construct the third set with all members added sequentially.
 		BandersnatchVrfVerifiable::push_members(&mut inter3, [alice].into_iter(), get_many)
 			.unwrap();
-		BandersnatchVrfVerifiable::push_members(&mut inter3, [bob].into_iter(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter3, [bob].into_iter(), get_many).unwrap();
+		BandersnatchVrfVerifiable::push_members(&mut inter3, [charlie].into_iter(), get_many)
 			.unwrap();
-		BandersnatchVrfVerifiable::push_members(
-			&mut inter3,
-			[charlie].into_iter(),
-			get_many,
-		)
-		.unwrap();
 
 		// Construct the fourth set with the first member joining alone, followed by the other members joining together.
 		BandersnatchVrfVerifiable::push_members(&mut inter4, [alice].into_iter(), get_many)
 			.unwrap();
-		BandersnatchVrfVerifiable::push_members(
-			&mut inter4,
-			[bob, charlie].into_iter(),
-			get_many,
-		)
-		.unwrap();
+		BandersnatchVrfVerifiable::push_members(&mut inter4, [bob, charlie].into_iter(), get_many)
+			.unwrap();
 
 		assert_eq!(inter1, inter2);
 		assert_eq!(inter2, inter3);
@@ -538,12 +524,8 @@ mod builder_tests {
 
 		let start = Instant::now();
 		members.iter().for_each(|member| {
-			BandersnatchVrfVerifiable::push_members(
-				&mut inter,
-				[*member].into_iter(),
-				get_many,
-			)
-			.unwrap();
+			BandersnatchVrfVerifiable::push_members(&mut inter, [*member].into_iter(), get_many)
+				.unwrap();
 		});
 
 		println!(
@@ -856,12 +838,8 @@ mod builder_tests {
 		let mut inter1 = BandersnatchVrfVerifiable::start_members(capacity);
 		let start = Instant::now();
 		members.iter().for_each(|member| {
-			BandersnatchVrfVerifiable::push_members(
-				&mut inter1,
-				[*member].into_iter(),
-				get_many,
-			)
-			.unwrap();
+			BandersnatchVrfVerifiable::push_members(&mut inter1, [*member].into_iter(), get_many)
+				.unwrap();
 		});
 		println!(
 			"* Push {} members one at a time: {} ms",
