@@ -660,8 +660,7 @@ mod builder_tests {
 
 		let start = Instant::now();
 		let aliases =
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &batch_items)
-				.unwrap();
+			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &batch_items).unwrap();
 		let batch_ms = (Instant::now() - start).as_millis();
 		println!("* Batch validate {} proofs: {} ms", num_proofs, batch_ms);
 
@@ -735,23 +734,18 @@ mod builder_tests {
 		let members = BandersnatchVrfVerifiable::finish_members(inter);
 
 		// Sanity: batch with all valid proofs should pass
-		assert!(BandersnatchVrfVerifiable::batch_validate(
-			capacity,
-			&members,
-			&batch_items,
-		)
-		.is_ok());
+		assert!(
+			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &batch_items,).is_ok()
+		);
 
 		// Corrupt the proof of the second item by flipping a byte in the proof data
 		let mut corrupted_items = batch_items.clone();
 		corrupted_items[1].proof[10] ^= 0xFF;
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(
-			capacity,
-			&members,
-			&corrupted_items,
-		)
-		.is_err());
+		assert!(
+			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &corrupted_items,)
+				.is_err()
+		);
 
 		// Also test with a wrong message on a valid proof
 		let mut wrong_message_items = batch_items.clone();
@@ -789,12 +783,10 @@ mod builder_tests {
 			message: b"outsider message".to_vec(),
 		});
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(
-			capacity,
-			&members,
-			&outsider_items,
-		)
-		.is_err());
+		assert!(
+			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &outsider_items,)
+				.is_err()
+		);
 
 		// Test with a proof created under a different context
 		let wrong_context = b"WrongContext";
@@ -816,12 +808,10 @@ mod builder_tests {
 			message: b"some message".to_vec(),
 		});
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(
-			capacity,
-			&members,
-			&wrong_ctx_items,
-		)
-		.is_err());
+		assert!(
+			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &wrong_ctx_items,)
+				.is_err()
+		);
 	});
 
 	test_for_all_domains!(open_validate_single_vs_multiple_keys, |domain_size| {
