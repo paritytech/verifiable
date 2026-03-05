@@ -175,8 +175,7 @@ mod tests {
 	}
 }
 
-/// Tests that require the `builder-params` feature.
-#[cfg(all(test, feature = "builder-params"))]
+#[cfg(test)]
 mod builder_tests {
 	use crate::{ring::ring_verifier_builder_params, Capacity, GenerateVerifiable};
 
