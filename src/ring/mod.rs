@@ -450,6 +450,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
 	}
 
+	fn free_slots(intermediate: &Self::Intermediate) -> usize {
+		intermediate.0.free_slots()
+	}
+
 	fn push_members(
 		intermediate: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,

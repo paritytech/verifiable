@@ -122,6 +122,24 @@ pub trait GenerateVerifiable {
 		lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()>;
 
+	/// Returns the number of remaining member slots in the intermediate.
+	fn free_slots(intermediate: &Self::Intermediate) -> usize;
+
+	/// Fills remaining slots by pushing members from a padding iterator.
+	///
+	/// Deduplication is the caller's responsibility.
+	fn pad_members(
+		intermediate: &mut Self::Intermediate,
+		padding: impl Iterator<Item = Self::Member>,
+		lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
+	) -> Result<(), ()> {
+		let slots = Self::free_slots(intermediate);
+		if slots == 0 {
+			return Ok(());
+		}
+		Self::push_members(intermediate, padding.take(slots), lookup)
+	}
+
 	/// Consume the `intermediate` value to create a new `Members` value.
 	fn finish_members(inter: Self::Intermediate) -> Self::Members;
 

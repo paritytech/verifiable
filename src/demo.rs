@@ -37,6 +37,10 @@ impl GenerateVerifiable for Trivial {
 		BoundedVec::new()
 	}
 
+	fn free_slots(intermediate: &Self::Intermediate) -> usize {
+		1024 - intermediate.len()
+	}
+
 	fn push_members(
 		inter: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
@@ -143,6 +147,10 @@ impl GenerateVerifiable for Simple {
 
 	fn start_members(_capacity: ()) -> Self::Intermediate {
 		BoundedVec::new()
+	}
+
+	fn free_slots(intermediate: &Self::Intermediate) -> usize {
+		1024 - intermediate.len()
 	}
 
 	fn push_members(

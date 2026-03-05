@@ -795,6 +795,70 @@ mod builder_tests {
 		);
 	});
 
+	test_for_all_domains!(pad_members_fills_remaining_slots, |domain_size| {
+		let capacity: RingSize = domain_size.into();
+
+		let secrets: Vec<_> = (0..5)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+			.collect();
+		let members: Vec<_> = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect();
+
+		let (_, builder_params) = start_members_from_params(domain_size);
+		let get_many = |range| {
+			(&builder_params)
+				.lookup(range)
+				.map(|v| {
+					v.into_iter()
+						.map(crate::ring::StaticChunk)
+						.collect::<Vec<_>>()
+				})
+				.ok_or(())
+		};
+
+		// Start with 3 members.
+		let mut inter = BandersnatchVrfVerifiable::start_members(capacity);
+		let initial_free = BandersnatchVrfVerifiable::free_slots(&inter);
+		assert_eq!(initial_free, capacity.size());
+
+		BandersnatchVrfVerifiable::push_members(
+			&mut inter,
+			members[..3].iter().copied(),
+			get_many,
+		)
+		.unwrap();
+		assert_eq!(BandersnatchVrfVerifiable::free_slots(&inter), initial_free - 3);
+
+		// Pad with all 5 candidates, filtering out the 3 already added.
+		let already_added = &members[..3];
+		let padding = members
+			.iter()
+			.copied()
+			.filter(|m| !already_added.contains(m));
+		BandersnatchVrfVerifiable::pad_members(&mut inter, padding, get_many).unwrap();
+		assert_eq!(BandersnatchVrfVerifiable::free_slots(&inter), initial_free - 5);
+
+		// Finalize and validate a proof against the padded ring.
+		let members_commitment = BandersnatchVrfVerifiable::finish_members(inter);
+
+		let context = b"pad-test";
+		let message = b"hello";
+		let commitment = BandersnatchVrfVerifiable::open(
+			capacity,
+			&members[0],
+			members.iter().copied(),
+		)
+		.unwrap();
+		let (proof, alias) =
+			BandersnatchVrfVerifiable::create(commitment, &secrets[0], context, message).unwrap();
+		let alias2 =
+			BandersnatchVrfVerifiable::validate(capacity, &proof, &members_commitment, context, message)
+				.unwrap();
+		assert_eq!(alias, alias2);
+	});
+
 	test_for_all_domains!(open_validate_single_vs_multiple_keys, |domain_size| {
 		use std::time::Instant;
 
