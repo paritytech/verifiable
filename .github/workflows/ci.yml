@@ -73,5 +73,5 @@ jobs:
             ~/.cargo/git
             target
           key: test-${{ hashFiles('Cargo.lock') }}
-      - run: cargo test --all-features
+      - run: cargo test --release --all-features
 
