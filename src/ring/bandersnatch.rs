@@ -161,7 +161,7 @@ mod tests {
 				BandersnatchVrfVerifiable::member_from_secret(&s)
 			})
 			.collect();
-		let member = members[0].clone();
+		let member = members[0];
 		let commitment = BandersnatchVrfVerifiable::open(
 			RingDomainSize::Domain11.into(),
 			&member,
@@ -368,7 +368,7 @@ mod builder_tests {
 				.lookup(range)
 				.map(|v| {
 					v.into_iter()
-						.map(|i| crate::ring::StaticChunk(i))
+						.map(crate::ring::StaticChunk)
 						.collect::<Vec<_>>()
 				})
 				.ok_or(())
@@ -376,17 +376,17 @@ mod builder_tests {
 
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter1,
-			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
+			[alice, bob, charlie].into_iter(),
 			get_many,
 		)
 		.unwrap();
-		BandersnatchVrfVerifiable::push_members(&mut inter2, [alice.clone()].into_iter(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter2, [alice].into_iter(), get_many)
 			.unwrap();
-		BandersnatchVrfVerifiable::push_members(&mut inter2, [bob.clone()].into_iter(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter2, [bob].into_iter(), get_many)
 			.unwrap();
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter2,
-			[charlie.clone()].into_iter(),
+			[charlie].into_iter(),
 			get_many,
 		)
 		.unwrap();
@@ -417,7 +417,7 @@ mod builder_tests {
 				.lookup(range)
 				.map(|v| {
 					v.into_iter()
-						.map(|i| crate::ring::StaticChunk(i))
+						.map(crate::ring::StaticChunk)
 						.collect::<Vec<_>>()
 				})
 				.ok_or(())
@@ -431,7 +431,7 @@ mod builder_tests {
 		// Construct the first set with all members added simultaneously.
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter1,
-			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
+			[alice, bob, charlie].into_iter(),
 			get_many,
 		)
 		.unwrap();
@@ -439,29 +439,29 @@ mod builder_tests {
 		// Construct the second set with all members added simultaneously.
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter2,
-			[alice.clone(), bob.clone(), charlie.clone()].into_iter(),
+			[alice, bob, charlie].into_iter(),
 			get_many,
 		)
 		.unwrap();
 
 		// Construct the third set with all members added sequentially.
-		BandersnatchVrfVerifiable::push_members(&mut inter3, [alice.clone()].into_iter(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter3, [alice].into_iter(), get_many)
 			.unwrap();
-		BandersnatchVrfVerifiable::push_members(&mut inter3, [bob.clone()].into_iter(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter3, [bob].into_iter(), get_many)
 			.unwrap();
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter3,
-			[charlie.clone()].into_iter(),
+			[charlie].into_iter(),
 			get_many,
 		)
 		.unwrap();
 
 		// Construct the fourth set with the first member joining alone, followed by the other members joining together.
-		BandersnatchVrfVerifiable::push_members(&mut inter4, [alice.clone()].into_iter(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter4, [alice].into_iter(), get_many)
 			.unwrap();
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter4,
-			[bob.clone(), charlie.clone()].into_iter(),
+			[bob, charlie].into_iter(),
 			get_many,
 		)
 		.unwrap();
@@ -499,7 +499,7 @@ mod builder_tests {
 				BandersnatchVrfVerifiable::member_from_secret(&secret)
 			})
 			.collect();
-		let member = members[3].clone();
+		let member = members[3];
 
 		let start = Instant::now();
 		let commitment =
@@ -523,7 +523,7 @@ mod builder_tests {
 				.lookup(range)
 				.map(|v| {
 					v.into_iter()
-						.map(|i| crate::ring::StaticChunk(i))
+						.map(crate::ring::StaticChunk)
 						.collect::<Vec<_>>()
 				})
 				.ok_or(())
@@ -540,7 +540,7 @@ mod builder_tests {
 		members.iter().for_each(|member| {
 			BandersnatchVrfVerifiable::push_members(
 				&mut inter,
-				[member.clone()].into_iter(),
+				[*member].into_iter(),
 				get_many,
 			)
 			.unwrap();
@@ -589,14 +589,14 @@ mod builder_tests {
 			.collect();
 		let member_keys: Vec<_> = secrets
 			.iter()
-			.map(|s| BandersnatchVrfVerifiable::member_from_secret(s))
+			.map(BandersnatchVrfVerifiable::member_from_secret)
 			.collect();
 
 		// Create proofs from different members with different messages
 		let mut proofs = Vec::new();
 		let mut expected_aliases = Vec::new();
 		for i in 0..num_proofs {
-			let member = member_keys[i].clone();
+			let member = member_keys[i];
 			let message = format!("Message from member {}", i);
 			let commitment =
 				BandersnatchVrfVerifiable::open(capacity, &member, member_keys.clone().into_iter())
@@ -619,19 +619,19 @@ mod builder_tests {
 				.lookup(range)
 				.map(|v| {
 					v.into_iter()
-						.map(|i| crate::ring::StaticChunk(i))
+						.map(crate::ring::StaticChunk)
 						.collect::<Vec<_>>()
 				})
 				.ok_or(())
 		};
 		let mut inter = BandersnatchVrfVerifiable::start_members(capacity);
-		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().cloned(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().copied(), get_many)
 			.unwrap();
 		let members = BandersnatchVrfVerifiable::finish_members(inter);
 
 		// Individual validation
 		let start = Instant::now();
-		for (proof, message, _alias) in &proofs {
+		for (proof, message, expected_alias) in &proofs {
 			let alias_out = BandersnatchVrfVerifiable::validate(
 				capacity,
 				proof,
@@ -640,7 +640,7 @@ mod builder_tests {
 				message.as_bytes(),
 			)
 			.unwrap();
-			assert_eq!(&alias_out, _alias);
+			assert_eq!(&alias_out, expected_alias);
 		}
 		let individual_ms = (Instant::now() - start).as_millis();
 		println!(
@@ -652,7 +652,7 @@ mod builder_tests {
 		let batch_items: Vec<_> = proofs
 			.iter()
 			.map(|(proof, message, _)| BatchProofItem {
-				proof: proof.clone(),
+				proof: *proof,
 				context: context.to_vec(),
 				message: message.as_bytes().to_vec(),
 			})
@@ -691,13 +691,13 @@ mod builder_tests {
 			.collect();
 		let member_keys: Vec<_> = secrets
 			.iter()
-			.map(|s| BandersnatchVrfVerifiable::member_from_secret(s))
+			.map(BandersnatchVrfVerifiable::member_from_secret)
 			.collect();
 
 		// Create 3 valid proofs
 		let mut batch_items = Vec::new();
 		for i in 0..3 {
-			let member = member_keys[i].clone();
+			let member = member_keys[i];
 			let message = format!("Message from member {}", i);
 			let commitment =
 				BandersnatchVrfVerifiable::open(capacity, &member, member_keys.clone().into_iter())
@@ -723,13 +723,13 @@ mod builder_tests {
 				.lookup(range)
 				.map(|v| {
 					v.into_iter()
-						.map(|i| crate::ring::StaticChunk(i))
+						.map(crate::ring::StaticChunk)
 						.collect::<Vec<_>>()
 				})
 				.ok_or(())
 		};
 		let mut inter = BandersnatchVrfVerifiable::start_members(capacity);
-		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().cloned(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().copied(), get_many)
 			.unwrap();
 		let members = BandersnatchVrfVerifiable::finish_members(inter);
 
@@ -765,7 +765,7 @@ mod builder_tests {
 		let outsider_secret = BandersnatchVrfVerifiable::new_secret([0xFFu8; 32]);
 		let outsider_key = BandersnatchVrfVerifiable::member_from_secret(&outsider_secret);
 		let mut extended_keys = member_keys.clone();
-		extended_keys.push(outsider_key.clone());
+		extended_keys.push(outsider_key);
 		let outsider_commitment =
 			BandersnatchVrfVerifiable::open(capacity, &outsider_key, extended_keys.into_iter())
 				.unwrap();
@@ -790,7 +790,7 @@ mod builder_tests {
 
 		// Test with a proof created under a different context
 		let wrong_context = b"WrongContext";
-		let member = member_keys[0].clone();
+		let member = member_keys[0];
 		let wrong_ctx_commitment =
 			BandersnatchVrfVerifiable::open(capacity, &member, member_keys.clone().into_iter())
 				.unwrap();
@@ -847,7 +847,7 @@ mod builder_tests {
 				.lookup(range)
 				.map(|v| {
 					v.into_iter()
-						.map(|i| crate::ring::StaticChunk(i))
+						.map(crate::ring::StaticChunk)
 						.collect::<Vec<_>>()
 				})
 				.ok_or(())
@@ -858,7 +858,7 @@ mod builder_tests {
 		members.iter().for_each(|member| {
 			BandersnatchVrfVerifiable::push_members(
 				&mut inter1,
-				[member.clone()].into_iter(),
+				[*member].into_iter(),
 				get_many,
 			)
 			.unwrap();
@@ -872,7 +872,7 @@ mod builder_tests {
 		let mut inter2 = BandersnatchVrfVerifiable::start_members(capacity);
 		let start = Instant::now();
 
-		BandersnatchVrfVerifiable::push_members(&mut inter2, members.iter().cloned(), get_many)
+		BandersnatchVrfVerifiable::push_members(&mut inter2, members.iter().copied(), get_many)
 			.unwrap();
 		println!(
 			"* Push {} members simultaneously: {} ms",

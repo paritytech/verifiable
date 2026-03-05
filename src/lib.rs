@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(clippy::result_unit_err)]
 
 extern crate alloc;
 extern crate core;
@@ -159,7 +160,7 @@ pub trait GenerateVerifiable {
 	/// individual.
 	///
 	/// - `context`: The context under which membership is proven. Proofs over different `[u8]`s
-	/// are unlinkable.
+	///   are unlinkable.
 	///
 	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
 	///
