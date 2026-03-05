@@ -533,7 +533,12 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 		let mut aliases = Vec::with_capacity(proofs.len());
 		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(verifier);
-		for BatchProofItem { proof, context, message } in proofs {
+		for BatchProofItem {
+			proof,
+			context,
+			message,
+		} in proofs
+		{
 			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 			let signature = RingVrfSignature::<S>::deserialize_compressed_unchecked(proof.as_ref())

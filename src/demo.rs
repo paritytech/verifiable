@@ -56,7 +56,7 @@ impl GenerateVerifiable for Trivial {
 	}
 
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
-		secret.clone()
+		*secret
 	}
 
 	#[cfg(feature = "prover")]
@@ -69,7 +69,7 @@ impl GenerateVerifiable for Trivial {
 		if !set.contains(member) {
 			return Err(());
 		}
-		Ok((member.clone(), set))
+		Ok((*member, set))
 	}
 
 	#[cfg(feature = "prover")]
@@ -82,7 +82,7 @@ impl GenerateVerifiable for Trivial {
 		if &member != secret {
 			return Err(());
 		}
-		Ok(((secret.clone()), secret.clone()))
+		Ok((*secret, *secret))
 	}
 
 	fn validate(
@@ -92,19 +92,19 @@ impl GenerateVerifiable for Trivial {
 		_context: &[u8],
 		_message: &[u8],
 	) -> Result<Alias, ()> {
-		if members.contains(&proof) {
-			Ok(proof.clone())
+		if members.contains(proof) {
+			Ok(*proof)
 		} else {
 			Err(())
 		}
 	}
 
 	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
-		Ok(secret.clone())
+		Ok(*secret)
 	}
 
 	fn sign(secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
-		Ok(secret.clone())
+		Ok(*secret)
 	}
 
 	fn verify_signature(
@@ -179,7 +179,7 @@ impl GenerateVerifiable for Simple {
 		if !set.contains(member) {
 			return Err(());
 		}
-		Ok((member.clone(), set))
+		Ok((*member, set))
 	}
 
 	#[cfg(feature = "prover")]
@@ -189,7 +189,7 @@ impl GenerateVerifiable for Simple {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
-		let public = Self::member_from_secret(&secret);
+		let public = Self::member_from_secret(secret);
 		if member != public {
 			return Err(());
 		}
@@ -199,7 +199,7 @@ impl GenerateVerifiable for Simple {
 
 		let sig = (context, message)
 			.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
-		Ok(((sig, public.clone()), public))
+		Ok(((sig, public), public))
 	}
 
 	fn validate(
@@ -216,13 +216,13 @@ impl GenerateVerifiable for Simple {
 		let p = PublicKey::from_bytes(&proof.1).unwrap();
 		(context, message).using_encoded(|b| {
 			p.verify_simple(SIG_CON, b, &s)
-				.map(|_| proof.1.clone())
+				.map(|_| proof.1)
 				.map_err(|_| ())
 		})
 	}
 
 	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
-		Ok(Self::member_from_secret(&secret))
+		Ok(Self::member_from_secret(secret))
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
@@ -259,13 +259,11 @@ mod tests {
 		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
 
 		let mut inter = <Simple as GenerateVerifiable>::start_members(());
-		<Simple as GenerateVerifiable>::push_members(
-			&mut inter,
-			[alice.clone()].into_iter(),
-			|_| Ok(alloc::vec![()]),
-		)
+		<Simple as GenerateVerifiable>::push_members(&mut inter, [alice].into_iter(), |_| {
+			Ok(alloc::vec![()])
+		})
 		.unwrap();
-		<Simple as GenerateVerifiable>::push_members(&mut inter, [bob.clone()].into_iter(), |_| {
+		<Simple as GenerateVerifiable>::push_members(&mut inter, [bob].into_iter(), |_| {
 			Ok(alloc::vec![()])
 		})
 		.unwrap();
