@@ -26,17 +26,23 @@ pub trait Capacity: Clone + Copy {
 /// The underlying crypto should guarantee that all `Alias` values used by a person to represent
 /// themself for each `Context` are unlinkable from both their underlying `PersonalId` as well as
 /// all other `Alias` values of theirs.
-///
-/// NOTE: This MUST remain equivalent to the type `Alias` in the crate `verifiable`.
 pub type Alias = [u8; 32];
 
 /// Entropy supplied for the creation of a secret key.
 pub type Entropy = [u8; 32];
 
+/// A single item in a batch proof validation request.
+///
+/// Groups together a proof with the context and message it was created for,
+/// so that multiple proofs can be validated in a single batch operation via
+/// [`GenerateVerifiable::batch_validate`].
 #[derive(Clone)]
 pub struct BatchProofItem<Proof> {
+	/// The ring VRF proof to validate.
 	pub proof: Proof,
+	/// The context under which the proof was created.
 	pub context: Vec<u8>,
+	/// The message that was signed.
 	pub message: Vec<u8>,
 }
 
@@ -49,10 +55,10 @@ pub struct BatchProofItem<Proof> {
 /// A value of this type represents a proof. It can be created using the `Self::create` function
 /// from the `Self::Secret` value associated with a `Self::Member` value who exists within a set of
 /// members identified with a `Self::Members` value. It can later be validated with the
-/// `Self::is_valid` function using `self` together with the same information used to crate it
+/// `Self::is_valid` function using `self` together with the same information used to create it
 /// (except the secret, of course!).
 ///
-/// A convenience `Receipt` type is provided for typical use cases which bundles the proof along
+/// A convenience [`Receipt`] type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
 pub trait GenerateVerifiable {
 	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
@@ -88,6 +94,9 @@ pub trait GenerateVerifiable {
 	/// Created via `sign`, verified via `verify_signature`.
 	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
+	/// A chunk of precomputed static data used by the `lookup` function when pushing members.
+	///
+	/// For ring VRF implementations, this is typically a G1 affine point from the SRS.
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 
 	/// The capacity type used to parametrize ring operations.
@@ -210,6 +219,7 @@ pub trait GenerateVerifiable {
 		Err(())
 	}
 
+	/// Verify a non-anonymous signature of `message` against the given `member`'s public key.
 	fn verify_signature(
 		_signature: &Self::Signature,
 		_message: &[u8],
@@ -218,10 +228,14 @@ pub trait GenerateVerifiable {
 		false
 	}
 
+	/// Check whether `member` is a valid encoded public key for this scheme.
 	fn is_member_valid(_member: &Self::Member) -> bool;
 }
 
-// This is just a convenience struct to help manage some of the witness data. No need to look at it.
+/// Convenience wrapper bundling a proof with its associated alias and message.
+///
+/// Provides a simpler API for the common create-then-verify workflow via
+/// [`Receipt::create`] and [`Receipt::verify`].
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, DecodeWithMemTracking)]
 pub struct Receipt<Gen: GenerateVerifiable> {
 	proof: Gen::Proof,
@@ -230,6 +244,9 @@ pub struct Receipt<Gen: GenerateVerifiable> {
 }
 
 impl<Gen: GenerateVerifiable> Receipt<Gen> {
+	/// Create a receipt by opening a commitment and producing a proof in one step.
+	///
+	/// Combines [`GenerateVerifiable::open`] and [`GenerateVerifiable::create`].
 	#[cfg(feature = "prover")]
 	pub fn create<'a>(
 		capacity: Gen::Capacity,
@@ -249,15 +266,22 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 			message,
 		})
 	}
+	/// Returns the alias associated with this receipt.
 	pub fn alias(&self) -> &Alias {
 		&self.alias
 	}
+	/// Returns the message associated with this receipt.
 	pub fn message(&self) -> &[u8] {
 		&self.message
 	}
+	/// Consume the receipt and return the alias and message.
 	pub fn into_parts(self) -> (Alias, Vec<u8>) {
 		(self.alias, self.message)
 	}
+	/// Verify the receipt against the given `members` set and `context`.
+	///
+	/// On success, returns the validated alias and message. On failure, returns
+	/// the receipt back so it can be inspected or retried.
 	pub fn verify(
 		self,
 		capacity: Gen::Capacity,
@@ -275,6 +299,7 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 			}
 		}
 	}
+	/// Check whether this receipt contains a valid proof for the given `members` and `context`.
 	pub fn is_valid(
 		&self,
 		capacity: Gen::Capacity,

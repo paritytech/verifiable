@@ -7,6 +7,9 @@ use crate::ring::{make_ring_prover_params, RingDomainSize, RingProofParamsCache}
 /// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
 pub type BandersnatchVrfVerifiable = RingVrfVerifiable<BandersnatchSha512Ell2>;
 
+/// Lazy-static cache for Bandersnatch ring proof params.
+///
+/// Params are computed once per domain size on first access and reused thereafter.
 #[cfg(feature = "prover")]
 pub struct BandersnatchParamsCache;
 

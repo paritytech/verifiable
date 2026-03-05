@@ -200,7 +200,9 @@ impl<S: RingSuiteExt> RingProofParamsCache<S> for NullCache {
 	}
 }
 
-pub trait EncodedTypesBounds:
+/// Fixed-size byte array used to represent a serialized cryptographic object
+/// (public key, proof, or signature).
+pub trait FixedBytes:
 	Clone
 	+ Eq
 	+ FullCodec
@@ -211,9 +213,10 @@ pub trait EncodedTypesBounds:
 	+ AsRef<[u8]>
 	+ AsMut<[u8]>
 {
+	/// The zero (all-bytes-zero) value, used as an initial buffer for serialization.
 	const ZERO: Self;
 }
-impl<const N: usize> EncodedTypesBounds for [u8; N] {
+impl<const N: usize> FixedBytes for [u8; N] {
 	const ZERO: Self = [0; N];
 }
 
@@ -242,11 +245,11 @@ pub trait RingSuiteExt: RingSuite + Debug + 'static {
 	const SIGNATURE_SIZE: usize;
 
 	/// Byte array type for encoded public keys.
-	type PublicKeyBytes: EncodedTypesBounds;
+	type PublicKeyBytes: FixedBytes;
 	/// Byte array type for ring VRF proofs.
-	type RingProofBytes: EncodedTypesBounds;
+	type RingProofBytes: FixedBytes;
 	/// Byte array type for plain VRF signatures.
-	type SignatureBytes: EncodedTypesBounds;
+	type SignatureBytes: FixedBytes;
 
 	/// The curve static data provider for this suite.
 	type CurveParams: RingCurveParams;
@@ -342,6 +345,11 @@ macro_rules! impl_common_traits {
 	};
 }
 
+/// Intermediate state while building a ring member set.
+///
+/// Wraps a [`ark_vrf::ring::VerifierKeyBuilder`] and accumulates members via
+/// [`GenerateVerifiable::push_members`]. Finalized into a [`MembersCommitment`]
+/// via [`GenerateVerifiable::finish_members`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersSet<S: RingSuiteExt>(pub(crate) ark_vrf::ring::VerifierKeyBuilder<S>);
 
@@ -353,6 +361,10 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersSet<S> {
 	}
 }
 
+/// Finalized commitment to a set of ring members.
+///
+/// This is the compact representation used for proof verification. Produced by
+/// [`GenerateVerifiable::finish_members`] from a [`MembersSet`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
 
@@ -366,11 +378,20 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersCommitment<S> {
 
 pub(crate) type PublicKey<S> = ark_vrf::Public<S>;
 
+/// A chunk of the ring builder's static data (a G1 affine point).
+///
+/// Used by the `lookup` function in [`GenerateVerifiable::push_members`] to supply
+/// precomputed SRS points needed to update the ring commitment.
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone, Debug)]
 pub struct StaticChunk<S: RingSuiteExt>(pub ark_vrf::ring::G1Affine<S>);
 
 impl_common_traits!(StaticChunk<S: RingSuiteExt>, S::STATIC_CHUNK_SIZE);
 
+/// State produced by [`GenerateVerifiable::open`] and consumed by [`GenerateVerifiable::create`].
+///
+/// Contains the prover's position in the ring and the keying material needed to
+/// generate a ring VRF proof. This is serializable so it can be transferred to
+/// an offline/air-gapped signing device.
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone)]
 pub struct ProverState<S: RingSuiteExt> {
 	pub(crate) domain_size: u32,

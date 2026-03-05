@@ -3,7 +3,8 @@ use bounded_collections::{BoundedVec, ConstU32};
 #[cfg(feature = "schnorrkel")]
 use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
-/// Unit type implements Capacity for demo implementations that don't use ring VRF.
+/// [`Capacity`] impl for demo implementations that don't use ring VRF.
+/// Always returns a fixed size of 1024.
 impl Capacity for () {
 	fn size(&self) -> usize {
 		1024
