@@ -513,7 +513,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			output: signature.output,
 		};
 
-		ark_vrf::Public::<S>::verify(io, &message, &signature.proof, &ring_verifier)
+		ark_vrf::Public::<S>::verify(io, message, &signature.proof, &ring_verifier)
 			.map_err(|_| ())?;
 
 		Ok(make_alias(&signature.output))
