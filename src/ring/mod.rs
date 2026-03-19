@@ -4,7 +4,10 @@ use core::{marker::PhantomData, ops::Deref, ops::Range};
 pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_vrf::ring::{RingSuite, Verifier};
+use ark_vrf::{
+	ring::{RingSuite, Verifier},
+	VrfIo,
+};
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
@@ -419,13 +422,15 @@ struct RingVrfSignature<S: RingSuiteExt> {
 	proof: ark_vrf::ring::Proof<S>,
 }
 
+#[derive(CanonicalSerialize, CanonicalDeserialize)]
+struct RingVrfMultiContextSignature<S: RingSuiteExt> {
+	outputs: Vec<ark_vrf::Output<S>>,
+	proof: ark_vrf::ring::Proof<S>,
+}
+
 #[inline(always)]
 fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
-	output
-		.hash()
-		.get(..32)
-		.and_then(|raw| raw.try_into().ok())
-		.expect("Suite hash should be at least 32 bytes")
+	output.hash::<32>()
 }
 
 /// Generic ring VRF implementation parameterized over the ring suite.
@@ -440,6 +445,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Intermediate = MembersSet<S>;
 	type Member = S::PublicKeyBytes;
 	type Proof = S::RingProofBytes;
+	type MultiContextProof = Vec<u8>;
 	type Signature = S::SignatureBytes;
 	type StaticChunk = StaticChunk<S>;
 	type Capacity = RingSize<S>;
@@ -477,7 +483,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn new_secret(entropy: Entropy) -> Self::Secret {
-		Self::Secret::from_seed(&entropy)
+		Self::Secret::from_seed(entropy)
 	}
 
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
@@ -509,16 +515,56 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let signature =
 			RingVrfSignature::<S>::deserialize_compressed(proof.as_ref()).map_err(|_| ())?;
 
-		ark_vrf::Public::<S>::verify(
+		let io = VrfIo {
 			input,
-			signature.output,
-			message,
-			&signature.proof,
-			&ring_verifier,
-		)
-		.map_err(|_| ())?;
+			output: signature.output,
+		};
+
+		ark_vrf::Public::<S>::verify(io, message, &signature.proof, &ring_verifier)
+			.map_err(|_| ())?;
 
 		Ok(make_alias(&signature.output))
+	}
+
+	fn validate_multi_context(
+		capacity: Self::Capacity,
+		proof: &Self::MultiContextProof,
+		members: &Self::Members,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<Vec<Alias>, ()> {
+		// This doesn't require the whole kzg. Thus is more appropriate if used on-chain
+		// Is a bit slower as it requires to recompute piop_params, but still in the order of ms
+		let ring_verifier = ark_vrf::ring::RingProofParams::<S>::verifier_no_context(
+			members.0.clone(),
+			capacity.size(),
+		);
+
+		let signature =
+			RingVrfMultiContextSignature::<S>::deserialize_compressed(&**proof).map_err(|_| ())?;
+
+		if contexts.len() != signature.outputs.len() {
+			return Err(());
+		}
+
+		let (ios, aliases): (Vec<_>, Vec<_>) = contexts
+			.iter()
+			.zip(signature.outputs)
+			.map(|(ctx, output)| {
+				let input_msg = [S::VRF_INPUT_DOMAIN, ctx].concat();
+				let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
+
+				let io = VrfIo { input, output };
+				let alias = make_alias(&output);
+
+				(io, alias)
+			})
+			.collect();
+
+		ark_vrf::Public::<S>::verify(ios, message, &signature.proof, &ring_verifier)
+			.map_err(|_| ())?;
+
+		Ok(aliases)
 	}
 
 	fn batch_validate(
@@ -544,7 +590,12 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			let signature = RingVrfSignature::<S>::deserialize_compressed_unchecked(proof.as_ref())
 				.map_err(|_| ())?;
 			aliases.push(make_alias(&signature.output));
-			batch_verifier.push(input, signature.output, message, &signature.proof);
+
+			let io = VrfIo {
+				input,
+				output: signature.output,
+			};
+			batch_verifier.push(io, message, &signature.proof);
 		}
 		if batch_verifier.verify().is_ok() {
 			return Ok(aliases);
@@ -558,7 +609,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 		let output = secret.output(input);
 
-		let proof = secret.prove(input, output, b"");
+		let io = VrfIo { input, output };
+		let proof = secret.prove(io, b"");
 		let signature = IetfVrfSignature::<S> { output, proof };
 
 		let mut raw = S::SignatureBytes::ZERO;
@@ -583,9 +635,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let Ok(public) = PublicKey::<S>::deserialize_compressed(member.as_ref()) else {
 			return false;
 		};
-		public
-			.verify(input, signature.output, b"", &signature.proof)
-			.is_ok()
+		let io = VrfIo {
+			input,
+			output: signature.output,
+		};
+		public.verify(io, b"", &signature.proof).is_ok()
 	}
 
 	#[cfg(feature = "prover")]
@@ -603,7 +657,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.collect::<Result<Vec<_>, _>>()?;
 		let member = PublicKey::<S>::deserialize_compressed(member.as_ref()).map_err(|_| ())?;
 		let prover_idx = pks.iter().position(|&m| m == member.0).ok_or(())? as u32;
-		let prover_key = S::ParamsCache::get(capacity.dom_size).prover_key(&pks[..]);
+		let prover_key = S::ParamsCache::get(capacity.dom_size)
+			.prover_key(&pks[..])
+			.map_err(|_| ())?;
 		Ok(ProverState {
 			domain_size: capacity.dom_size.value(),
 			prover_idx,
@@ -632,7 +688,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let preout = secret.output(input);
 		let alias = make_alias(&preout);
 
-		let proof = secret.prove(input, preout, message, &ring_prover);
+		let io = VrfIo {
+			input,
+			output: preout,
+		};
+		let proof = secret.prove(io, message, &ring_prover);
 
 		let signature = RingVrfSignature::<S> {
 			output: preout,
@@ -645,6 +705,49 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.map_err(|_| ())?;
 
 		Ok((buf, alias))
+	}
+
+	#[cfg(feature = "prover")]
+	fn create_multi_context(
+		commitment: Self::Commitment,
+		secret: &Self::Secret,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()> {
+		use ark_vrf::ring::Prover;
+		let domain_size = RingDomainSize::try_from(commitment.domain_size).map_err(|_| ())?;
+		let params = S::ParamsCache::get(domain_size);
+		if commitment.prover_idx >= params.max_ring_size() as u32 {
+			return Err(());
+		}
+
+		let ring_prover = params.prover(commitment.prover_key, commitment.prover_idx as usize);
+
+		let (ios, aliases, outputs): (Vec<_>, Vec<_>, Vec<_>) = contexts
+			.iter()
+			.map(|ctx| {
+				let input_msg = [S::VRF_INPUT_DOMAIN, ctx].concat();
+				let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
+				let preout = secret.output(input);
+				let alias = make_alias(&preout);
+
+				let io = VrfIo {
+					input,
+					output: preout,
+				};
+
+				(io, alias, preout)
+			})
+			.collect();
+
+		let proof = secret.prove(ios, message, &ring_prover);
+
+		let signature = RingVrfMultiContextSignature::<S> { outputs, proof };
+
+		let mut buf = vec![];
+		signature.serialize_compressed(&mut buf).map_err(|_| ())?;
+
+		Ok((buf, aliases))
 	}
 
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
