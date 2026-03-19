@@ -25,6 +25,7 @@ impl GenerateVerifiable for Trivial {
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = [u8; 32];
+	type MultiContextProof = Vec<u8>;
 	type Signature = [u8; 32];
 	type StaticChunk = ();
 	type Capacity = ();
@@ -85,6 +86,16 @@ impl GenerateVerifiable for Trivial {
 		Ok((*secret, *secret))
 	}
 
+	#[cfg(feature = "prover")]
+	fn create_multi_context(
+		commitment: Self::Commitment,
+		secret: &Self::Secret,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()> {
+		todo!()
+	}
+
 	fn validate(
 		_capacity: (),
 		proof: &Self::Proof,
@@ -133,6 +144,7 @@ impl GenerateVerifiable for Simple {
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
+	type MultiContextProof = Vec<u8>;
 	type Signature = [u8; 64];
 	type StaticChunk = ();
 	type Capacity = ();
@@ -200,6 +212,16 @@ impl GenerateVerifiable for Simple {
 		let sig = (context, message)
 			.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
 		Ok(((sig, public), public))
+	}
+
+	#[cfg(feature = "prover")]
+	fn create_multi_context(
+		commitment: Self::Commitment,
+		secret: &Self::Secret,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()> {
+		todo!()
 	}
 
 	fn validate(
