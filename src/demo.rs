@@ -25,7 +25,7 @@ impl GenerateVerifiable for Trivial {
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = [u8; 32];
-	type MultiContextProof = Vec<u8>;
+	type MultiContextProof = Vec<Self::Proof>;
 	type Signature = [u8; 32];
 	type StaticChunk = ();
 	type Capacity = ();
@@ -93,7 +93,10 @@ impl GenerateVerifiable for Trivial {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()> {
-		todo!()
+		contexts
+			.iter()
+			.map(|ctx| Self::create(commitment.clone(), secret, ctx, message))
+			.collect()
 	}
 
 	fn validate(
@@ -108,6 +111,20 @@ impl GenerateVerifiable for Trivial {
 		} else {
 			Err(())
 		}
+	}
+
+	fn validate_multi_context(
+		capacity: Self::Capacity,
+		proof: &Self::MultiContextProof,
+		members: &Self::Members,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<Vec<Alias>, ()> {
+		proof
+			.iter()
+			.zip(contexts.iter())
+			.map(|(proof, ctx)| Self::validate(capacity, proof, members, ctx, message))
+			.collect()
 	}
 
 	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
@@ -144,7 +161,7 @@ impl GenerateVerifiable for Simple {
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
 	type Proof = ([u8; 64], Alias);
-	type MultiContextProof = Vec<u8>;
+	type MultiContextProof = Vec<Self::Proof>;
 	type Signature = [u8; 64];
 	type StaticChunk = ();
 	type Capacity = ();
@@ -221,7 +238,10 @@ impl GenerateVerifiable for Simple {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()> {
-		todo!()
+		contexts
+			.iter()
+			.map(|ctx| Self::create(commitment.clone(), secret, ctx, message))
+			.collect()
 	}
 
 	fn validate(
@@ -241,6 +261,20 @@ impl GenerateVerifiable for Simple {
 				.map(|_| proof.1)
 				.map_err(|_| ())
 		})
+	}
+
+	fn validate_multi_context(
+		capacity: Self::Capacity,
+		proof: &Self::MultiContextProof,
+		members: &Self::Members,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<Vec<Alias>, ()> {
+		proof
+			.iter()
+			.zip(contexts.iter())
+			.map(|(proof, ctx)| Self::validate(capacity, proof, members, ctx, message))
+			.collect()
 	}
 
 	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {

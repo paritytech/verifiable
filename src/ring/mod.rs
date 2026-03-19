@@ -549,7 +549,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 		let (ios, aliases): (Vec<_>, Vec<_>) = contexts
 			.iter()
-			.zip(signature.outputs.into_iter())
+			.zip(signature.outputs)
 			.map(|(ctx, output)| {
 				let input_msg = [S::VRF_INPUT_DOMAIN, ctx].concat();
 				let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
