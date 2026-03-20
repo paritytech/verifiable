@@ -92,9 +92,16 @@ impl<S: RingSuiteExt> From<RingDomainSize> for RingSize<S> {
 	}
 }
 
+impl<S: RingSuiteExt> RingSize<S> {
+	/// Returns the maximum ring capacity.
+	pub const fn max_ring_size(&self) -> usize {
+		max_ring_size_from_pcs_domain_size::<S>(self.dom_size.value())
+	}
+}
+
 impl<S: RingSuiteExt> Capacity for RingSize<S> {
 	fn size(&self) -> usize {
-		max_ring_size_from_pcs_domain_size::<S>(self.dom_size.value())
+		self.max_ring_size()
 	}
 }
 
