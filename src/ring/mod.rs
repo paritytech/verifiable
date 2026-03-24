@@ -149,7 +149,7 @@ impl RingCurveParams for Bls12_381Params {
 }
 
 /// The max ring that can be handled for both sign/verify for the given PCS domain size.
-const fn max_ring_size_from_pcs_domain_size<S: RingSuiteExt>(pcs_domain_size: u32) -> usize {
+pub const fn max_ring_size_from_pcs_domain_size<S: RingSuiteExt>(pcs_domain_size: u32) -> usize {
 	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(pcs_domain_size as usize)
 }
 
