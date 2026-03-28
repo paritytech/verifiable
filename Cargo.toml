@@ -1,6 +1,6 @@
 [package]
 name = "verifiable"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "Interface for cryptographic proof of membership of a set with known members"
 authors = ["Parity Technologies <admin@parity.io>"]
@@ -16,7 +16,7 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 schnorrkel = { version = "0.11.5", default-features = false, optional = true }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-ark-vrf = { version = "0.2.2", default-features = false, features = ["bandersnatch", "ring"] }
+ark-vrf = { version = "0.3.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"] }
 
 [dev-dependencies]
