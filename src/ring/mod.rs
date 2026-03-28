@@ -421,11 +421,7 @@ struct RingVrfSignature<S: RingSuiteExt> {
 
 #[inline(always)]
 fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
-	output
-		.hash()
-		.get(..32)
-		.and_then(|raw| raw.try_into().ok())
-		.expect("Suite hash should be at least 32 bytes")
+	output.hash::<32>()
 }
 
 /// Generic ring VRF implementation parameterized over the ring suite.
@@ -477,7 +473,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn new_secret(entropy: Entropy) -> Self::Secret {
-		Self::Secret::from_seed(&entropy)
+		Self::Secret::from_seed(entropy)
 	}
 
 	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
@@ -509,9 +505,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let signature =
 			RingVrfSignature::<S>::deserialize_compressed(proof.as_ref()).map_err(|_| ())?;
 
+		let io = ark_vrf::VrfIo { input, output: signature.output };
 		ark_vrf::Public::<S>::verify(
-			input,
-			signature.output,
+			io,
 			message,
 			&signature.proof,
 			&ring_verifier,
@@ -544,7 +540,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			let signature = RingVrfSignature::<S>::deserialize_compressed_unchecked(proof.as_ref())
 				.map_err(|_| ())?;
 			aliases.push(make_alias(&signature.output));
-			batch_verifier.push(input, signature.output, message, &signature.proof);
+			let io = ark_vrf::VrfIo { input, output: signature.output };
+			batch_verifier.push(io, message, &signature.proof);
 		}
 		if batch_verifier.verify().is_ok() {
 			return Ok(aliases);
@@ -556,10 +553,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		use ark_vrf::ietf::Prover;
 		let input_msg = [S::VRF_INPUT_DOMAIN, message].concat();
 		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let output = secret.output(input);
+		let io = secret.vrf_io(input);
 
-		let proof = secret.prove(input, output, b"");
-		let signature = IetfVrfSignature::<S> { output, proof };
+		let proof = secret.prove(io, b"");
+		let signature = IetfVrfSignature::<S> { output: io.output, proof };
 
 		let mut raw = S::SignatureBytes::ZERO;
 		signature
@@ -583,8 +580,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let Ok(public) = PublicKey::<S>::deserialize_compressed(member.as_ref()) else {
 			return false;
 		};
+		let io = ark_vrf::VrfIo { input, output: signature.output };
 		public
-			.verify(input, signature.output, b"", &signature.proof)
+			.verify(io, b"", &signature.proof)
 			.is_ok()
 	}
 
@@ -603,7 +601,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.collect::<Result<Vec<_>, _>>()?;
 		let member = PublicKey::<S>::deserialize_compressed(member.as_ref()).map_err(|_| ())?;
 		let prover_idx = pks.iter().position(|&m| m == member.0).ok_or(())? as u32;
-		let prover_key = S::ParamsCache::get(capacity.dom_size).prover_key(&pks[..]);
+		let prover_key = S::ParamsCache::get(capacity.dom_size).prover_key(&pks[..]).map_err(|_| ())?;
 		Ok(ProverState {
 			domain_size: capacity.dom_size.value(),
 			prover_idx,
@@ -629,13 +627,13 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 		let input_msg = [S::VRF_INPUT_DOMAIN, context].concat();
 		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let preout = secret.output(input);
-		let alias = make_alias(&preout);
+		let io = secret.vrf_io(input);
+		let alias = make_alias(&io.output);
 
-		let proof = secret.prove(input, preout, message, &ring_prover);
+		let proof = secret.prove(io, message, &ring_prover);
 
 		let signature = RingVrfSignature::<S> {
-			output: preout,
+			output: io.output,
 			proof,
 		};
 
