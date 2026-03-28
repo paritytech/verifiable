@@ -505,14 +505,12 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let signature =
 			RingVrfSignature::<S>::deserialize_compressed(proof.as_ref()).map_err(|_| ())?;
 
-		let io = ark_vrf::VrfIo { input, output: signature.output };
-		ark_vrf::Public::<S>::verify(
-			io,
-			message,
-			&signature.proof,
-			&ring_verifier,
-		)
-		.map_err(|_| ())?;
+		let io = ark_vrf::VrfIo {
+			input,
+			output: signature.output,
+		};
+		ark_vrf::Public::<S>::verify(io, message, &signature.proof, &ring_verifier)
+			.map_err(|_| ())?;
 
 		Ok(make_alias(&signature.output))
 	}
@@ -540,7 +538,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			let signature = RingVrfSignature::<S>::deserialize_compressed_unchecked(proof.as_ref())
 				.map_err(|_| ())?;
 			aliases.push(make_alias(&signature.output));
-			let io = ark_vrf::VrfIo { input, output: signature.output };
+			let io = ark_vrf::VrfIo {
+				input,
+				output: signature.output,
+			};
 			batch_verifier.push(io, message, &signature.proof);
 		}
 		if batch_verifier.verify().is_ok() {
@@ -556,7 +557,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let io = secret.vrf_io(input);
 
 		let proof = secret.prove(io, b"");
-		let signature = IetfVrfSignature::<S> { output: io.output, proof };
+		let signature = IetfVrfSignature::<S> {
+			output: io.output,
+			proof,
+		};
 
 		let mut raw = S::SignatureBytes::ZERO;
 		signature
@@ -580,10 +584,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let Ok(public) = PublicKey::<S>::deserialize_compressed(member.as_ref()) else {
 			return false;
 		};
-		let io = ark_vrf::VrfIo { input, output: signature.output };
-		public
-			.verify(io, b"", &signature.proof)
-			.is_ok()
+		let io = ark_vrf::VrfIo {
+			input,
+			output: signature.output,
+		};
+		public.verify(io, b"", &signature.proof).is_ok()
 	}
 
 	#[cfg(feature = "prover")]
@@ -601,7 +606,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.collect::<Result<Vec<_>, _>>()?;
 		let member = PublicKey::<S>::deserialize_compressed(member.as_ref()).map_err(|_| ())?;
 		let prover_idx = pks.iter().position(|&m| m == member.0).ok_or(())? as u32;
-		let prover_key = S::ParamsCache::get(capacity.dom_size).prover_key(&pks[..]).map_err(|_| ())?;
+		let prover_key = S::ParamsCache::get(capacity.dom_size)
+			.prover_key(&pks[..])
+			.map_err(|_| ())?;
 		Ok(ProverState {
 			domain_size: capacity.dom_size.value(),
 			prover_idx,

@@ -56,12 +56,12 @@ fn main() {
 	print_byte_array("TEST_PUBLIC_KEY", &member);
 	print_byte_array("TEST_VRF_SIGNATURE", &signature);
 
-	for i in 0..2 {
+	for name in &VOUCHER_NAMES[..2] {
 		let mut voucher_entropy = [0u8; 32];
 		rng.fill_bytes(&mut voucher_entropy);
 		let voucher_secret = BandersnatchVrfVerifiable::new_secret(voucher_entropy);
 		let voucher_member = BandersnatchVrfVerifiable::member_from_secret(&voucher_secret);
-		print_byte_array(VOUCHER_NAMES[i], &voucher_member);
+		print_byte_array(name, &voucher_member);
 	}
 
 	validate_keys(&member, &message, &signature);
