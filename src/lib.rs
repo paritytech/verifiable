@@ -89,6 +89,13 @@ pub trait GenerateVerifiable {
 	///
 	/// This is expected to be passed on-chain as a parameter, but never stored.
 	type Proof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
+	/// A proof of membership in a group, verifiable against `Members`.
+	///
+	/// This kind of proof is created in two steps using [Self::open] and then [Self::create_multi_context]
+	/// and later can be verified by [Self::is_valid_multi_context] or [Self::validate_multi_context].
+	///
+	/// In general, this proof is the same as [Self::Proof] but represents a multi-context proof.
+	type MultiContextProof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 	/// A signature attributable to a specific `Member`, verifiable against that member's
 	/// public key.
 	///
@@ -174,6 +181,20 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()>;
 
+	/// Works like [`Self::create`] but takes multiple contexts as an input and returns aliases
+	/// corresponding to these contexts.
+	///
+	/// Calling it will have the same effect as running [`Self::create`] multiple times on each
+	/// `context` from the `contexts` but additionally the proof will guarantee that all these
+	/// aliases are derived from the correponding contexts using the same `secret`.
+	#[cfg(feature = "prover")]
+	fn create_multi_context(
+		commitment: Self::Commitment,
+		secret: &Self::Secret,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()>;
+
 	/// Make a non-anonymous signature of `message` using `secret`.
 	fn sign(_secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
 		Err(())
@@ -196,6 +217,23 @@ pub trait GenerateVerifiable {
 		}
 	}
 
+	/// Check whether `proof` is a valid proof of membership in `members` in every `context` from the given `contexts`;
+	/// if so, ensure that the member is necessarily associated with corresponding `alias` from the given `aliases` in this `context` and
+	/// that they elected to opine `message`.
+	fn is_valid_multi_context(
+		capacity: Self::Capacity,
+		proof: &Self::MultiContextProof,
+		members: &Self::Members,
+		contexts: &[&[u8]],
+		aliases: &[Alias],
+		message: &[u8],
+	) -> bool {
+		match Self::validate_multi_context(capacity, proof, members, contexts, message) {
+			Ok(a) => a == aliases,
+			Err(()) => false,
+		}
+	}
+
 	/// Generate the alias a `secret` would have in a given `context`.
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()>;
 
@@ -207,6 +245,17 @@ pub trait GenerateVerifiable {
 		_context: &[u8],
 		_message: &[u8],
 	) -> Result<Alias, ()> {
+		Err(())
+	}
+
+	/// Like `is_valid_multi_context`, but aliases are returned, not provided.
+	fn validate_multi_context(
+		_capacity: Self::Capacity,
+		_proof: &Self::MultiContextProof,
+		_members: &Self::Members,
+		_contexts: &[&[u8]],
+		_message: &[u8],
+	) -> Result<Vec<Alias>, ()> {
 		Err(())
 	}
 
