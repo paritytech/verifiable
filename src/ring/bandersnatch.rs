@@ -1,5 +1,5 @@
 use crate::ring::{Bls12_381Params, RingSuiteExt, RingVrfVerifiable};
-use ark_vrf::suites::bandersnatch::{BandersnatchSha512Ell2, RingProofParams};
+pub use ark_vrf::suites::bandersnatch::{BandersnatchSha512Ell2, RingProofParams};
 
 #[cfg(feature = "prover")]
 use crate::ring::{make_ring_prover_params, RingDomainSize, RingProofParamsCache};

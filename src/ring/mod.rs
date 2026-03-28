@@ -152,7 +152,7 @@ impl RingCurveParams for Bls12_381Params {
 }
 
 /// The max ring that can be handled for both sign/verify for the given PCS domain size.
-const fn max_ring_size_from_pcs_domain_size<S: RingSuiteExt>(pcs_domain_size: u32) -> usize {
+pub const fn max_ring_size_from_pcs_domain_size<S: RingSuiteExt>(pcs_domain_size: u32) -> usize {
 	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(pcs_domain_size as usize)
 }
 
@@ -519,7 +519,6 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			input,
 			output: signature.output,
 		};
-
 		ark_vrf::Public::<S>::verify(io, message, &signature.proof, &ring_verifier)
 			.map_err(|_| ())?;
 
@@ -607,11 +606,13 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		use ark_vrf::ietf::Prover;
 		let input_msg = [S::VRF_INPUT_DOMAIN, message].concat();
 		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let output = secret.output(input);
+		let io = secret.vrf_io(input);
 
-		let io = VrfIo { input, output };
 		let proof = secret.prove(io, b"");
-		let signature = IetfVrfSignature::<S> { output, proof };
+		let signature = IetfVrfSignature::<S> {
+			output: io.output,
+			proof,
+		};
 
 		let mut raw = S::SignatureBytes::ZERO;
 		signature
@@ -685,17 +686,12 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 		let input_msg = [S::VRF_INPUT_DOMAIN, context].concat();
 		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let preout = secret.output(input);
-		let alias = make_alias(&preout);
-
-		let io = VrfIo {
-			input,
-			output: preout,
-		};
+		let io = secret.vrf_io(input);
+		let alias = make_alias(&io.output);
 		let proof = secret.prove(io, message, &ring_prover);
 
 		let signature = RingVrfSignature::<S> {
-			output: preout,
+			output: io.output,
 			proof,
 		};
 

@@ -387,7 +387,7 @@ mod tests {
 		assert!(ok);
 
 		let mut sig = sig;
-		sig[0] = 0;
+		sig[0] ^= 1;
 
 		let ok = {
 			let s = schnorrkel::Signature::from_bytes(&sig).unwrap();
