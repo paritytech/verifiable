@@ -37,13 +37,11 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	const MEMBERS_SET_SIZE: usize = 848;
 	const MEMBERS_COMMITMENT_SIZE: usize = 768;
 	const STATIC_CHUNK_SIZE: usize = 96;
-	const RING_PROOF_SIZE: usize = 788;
 	const SIGNATURE_SIZE: usize = 96;
 
 	type CurveParams = Bls12_381Params;
 
 	type PublicKeyBytes = [u8; Self::PUBLIC_KEY_SIZE];
-	type RingProofBytes = [u8; Self::RING_PROOF_SIZE];
 	type SignatureBytes = [u8; Self::SIGNATURE_SIZE];
 
 	#[cfg(feature = "prover")]
@@ -153,25 +151,6 @@ mod tests {
 		// SIGNATURE_SIZE
 		let signature = BandersnatchVrfVerifiable::sign(&secret, b"test").unwrap();
 		assert_eq!(signature.len(), S::SIGNATURE_SIZE);
-
-		// RING_PROOF_SIZE
-		let members: Vec<_> = (0..3)
-			.map(|i| {
-				let s = BandersnatchVrfVerifiable::new_secret([i as u8; 32]);
-				BandersnatchVrfVerifiable::member_from_secret(&s)
-			})
-			.collect();
-		let member = members[0];
-		let commitment = BandersnatchVrfVerifiable::open(
-			RingDomainSize::Domain11.into(),
-			&member,
-			members.into_iter(),
-		)
-		.unwrap();
-		let prover_secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
-		let (proof, _) =
-			BandersnatchVrfVerifiable::create(commitment, &prover_secret, b"ctx", b"msg").unwrap();
-		assert_eq!(proof.len(), S::RING_PROOF_SIZE);
 	}
 }
 
@@ -633,7 +612,7 @@ mod builder_tests {
 		let batch_items: Vec<_> = proofs
 			.iter()
 			.map(|(proof, message, _)| BatchProofItem {
-				proof: *proof,
+				proof: proof.clone(),
 				context: context.to_vec(),
 				message: message.as_bytes().to_vec(),
 			})
