@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0]
+
+### Breaking Changes
+- **Generic ring VRF implementation** ([#27](https://github.com/paritytech/verifiable/pull/27))
+  - `RingVrfVerifiable` is now generic over `RingSuiteExt` instead of being Bandersnatch-specific
+  - Introduced `RingSuiteExt`, `RingCurveParams`, `RingSize`, `FixedBytes` traits
+  - Ring capacity is now configurable via `RingDomainSize` ([#30](https://github.com/paritytech/verifiable/pull/30))
+  - Added `prover` feature gate for proof generation code
+  - `Capacity` trait replaces fixed ring size
+- **Remove `schnorrkel` dependency and demo module** ([#40](https://github.com/paritytech/verifiable/pull/40))
+  - Removed `Simple` (schnorrkel-based) and `Trivial` demo implementations
+  - Removed `schnorrkel` and `bounded-collections` dependencies
+- **Use uncompressed-unchecked codec for trusted domain types** ([#34](https://github.com/paritytech/verifiable/pull/34))
+
+### Added
+- **Multi-context proof creation and validation** ([#37](https://github.com/paritytech/verifiable/pull/37), [#40](https://github.com/paritytech/verifiable/pull/40))
+  - Added `create_multi_context`, `validate_multi_context`, `is_valid_multi_context` methods
+  - `create` and `validate` are provided methods delegating to their multi-context counterparts
+- **Batch proof validation** ([#26](https://github.com/paritytech/verifiable/pull/26))
+  - Added `batch_validate` method and `BatchProofItem` type
+
+### Changed
+- **Bump `ark-vrf` to 0.3** ([#39](https://github.com/paritytech/verifiable/pull/39))
+
 ## [0.2.0]
 
 ### Added
