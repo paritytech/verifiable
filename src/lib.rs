@@ -172,7 +172,11 @@ pub trait GenerateVerifiable {
 		secret: &Self::Secret,
 		context: &[u8],
 		message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()>;
+	) -> Result<(Self::Proof, Alias), ()> {
+		let (proof, aliases) =
+			Self::create_multi_context(commitment, secret, &[context], message)?;
+		Ok((proof, aliases[0]))
+	}
 
 	/// Works like [`Self::create`] but takes multiple contexts as an input and returns aliases
 	/// corresponding to these contexts.
@@ -232,13 +236,14 @@ pub trait GenerateVerifiable {
 
 	/// Like `is_valid`, but `alias` is returned, not provided.
 	fn validate(
-		_capacity: Self::Capacity,
-		_proof: &Self::Proof,
-		_members: &Self::Members,
-		_context: &[u8],
-		_message: &[u8],
+		capacity: Self::Capacity,
+		proof: &Self::Proof,
+		members: &Self::Members,
+		context: &[u8],
+		message: &[u8],
 	) -> Result<Alias, ()> {
-		Err(())
+		let result = Self::validate_multi_context(capacity, proof, members, &[context], message)?;
+		Ok(result[0])
 	}
 
 	/// Like `is_valid_multi_context`, but aliases are returned, not provided.
@@ -333,13 +338,7 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	) -> Result<(Alias, Vec<u8>), Self> {
 		match Gen::validate(capacity, &self.proof, members, context, &self.message) {
 			Ok(alias) => Ok((alias, self.message)),
-			Err(()) => {
-				if self.is_valid(capacity, members, context) {
-					Ok(self.into_parts())
-				} else {
-					Err(self)
-				}
-			}
+			Err(()) => Err(self),
 		}
 	}
 	/// Check whether this receipt contains a valid proof for the given `members` and `context`.

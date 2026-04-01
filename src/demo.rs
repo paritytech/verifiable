@@ -71,17 +71,6 @@ impl GenerateVerifiable for Trivial {
 	}
 
 	#[cfg(feature = "prover")]
-	fn create(
-		commitment: Self::Commitment,
-		secret: &Self::Secret,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
-		let (proof, aliases) = Self::create_multi_context(commitment, secret, &[context], message)?;
-		Ok((proof, aliases[0]))
-	}
-
-	#[cfg(feature = "prover")]
 	fn create_multi_context(
 		(member, _): Self::Commitment,
 		secret: &Self::Secret,
@@ -93,17 +82,6 @@ impl GenerateVerifiable for Trivial {
 		}
 		let aliases = contexts.iter().map(|_| *secret).collect();
 		Ok((vec![*secret; contexts.len()], aliases))
-	}
-
-	fn validate(
-		capacity: Self::Capacity,
-		proof: &Self::Proof,
-		members: &Self::Members,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<Alias, ()> {
-		let result = Self::validate_multi_context(capacity, proof, members, &[context], message)?;
-		Ok(result[0])
 	}
 
 	fn validate_multi_context(

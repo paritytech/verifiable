@@ -484,18 +484,6 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		bytes
 	}
 
-	fn validate(
-		capacity: Self::Capacity,
-		proof: &Self::Proof,
-		members: &Self::Members,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<Alias, ()> {
-		let result = Self::validate_multi_context(capacity, proof, members, &[context], message)?;
-		// The lengths of inputs and outputs are checked to be equal in `validate_multi_context`.
-		Ok(result[0])
-	}
-
 	fn validate_multi_context(
 		capacity: Self::Capacity,
 		proof: &Self::Proof,
@@ -639,17 +627,6 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			prover_idx,
 			prover_key,
 		})
-	}
-
-	#[cfg(feature = "prover")]
-	fn create(
-		commitment: Self::Commitment,
-		secret: &Self::Secret,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
-		let (proof, alias) = Self::create_multi_context(commitment, secret, &[context], message)?;
-		Ok((proof, alias[0]))
 	}
 
 	#[cfg(feature = "prover")]
