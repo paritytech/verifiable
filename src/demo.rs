@@ -77,8 +77,7 @@ impl GenerateVerifiable for Trivial {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
-		let (proof, aliases) =
-			Self::create_multi_context(commitment, secret, &[context], message)?;
+		let (proof, aliases) = Self::create_multi_context(commitment, secret, &[context], message)?;
 		Ok((proof, aliases[0]))
 	}
 
@@ -116,13 +115,7 @@ impl GenerateVerifiable for Trivial {
 	) -> Result<Vec<Alias>, ()> {
 		proof
 			.iter()
-			.map(|p| {
-				if members.contains(p) {
-					Ok(*p)
-				} else {
-					Err(())
-				}
-			})
+			.map(|p| if members.contains(p) { Ok(*p) } else { Err(()) })
 			.collect()
 	}
 
