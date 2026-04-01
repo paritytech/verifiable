@@ -31,7 +31,7 @@ the common single-context workflow.
 ## Implementation
 
 The provided implementation uses the Bandersnatch curve (BLS12-381 pairing)
-via [`ark-vrf`](https://github.com/nicola/ark-vrf):
+via [`ark-vrf`](https://github.com/davxy/ark-vrf):
 
 - `RingVrfVerifiable<S>` -- generic over any `RingSuiteExt` suite
 - `BandersnatchVrfVerifiable` -- concrete type alias for the Bandersnatch suite
