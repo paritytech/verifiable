@@ -37,7 +37,7 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	const MEMBERS_SET_SIZE: usize = 848;
 	const MEMBERS_COMMITMENT_SIZE: usize = 768;
 	const STATIC_CHUNK_SIZE: usize = 96;
-	const SIGNATURE_SIZE: usize = 96;
+	const SIGNATURE_SIZE: usize = 48;
 
 	type CurveParams = Bls12_381Params;
 
@@ -55,7 +55,7 @@ mod tests {
 	use ark_vrf::ring::SrsLookup;
 
 	use super::*;
-	use crate::{ring::RingSize, Capacity, GenerateVerifiable};
+	use crate::{ring::RingSize, Capacity, Verifiable};
 
 	// Type aliases for Bandersnatch-specific generic types
 	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
@@ -156,7 +156,7 @@ mod tests {
 
 #[cfg(test)]
 mod builder_tests {
-	use crate::{ring::ring_verifier_builder_params, Capacity, GenerateVerifiable};
+	use crate::{ring::ring_verifier_builder_params, Capacity, Verifiable};
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
@@ -889,9 +889,9 @@ mod builder_tests {
 	});
 
 	fn build_members(
-		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as GenerateVerifiable>::Member>,
+		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as Verifiable>::Member>,
 		domain_size: RingDomainSize,
-	) -> <BandersnatchVrfVerifiable as GenerateVerifiable>::Members {
+	) -> <BandersnatchVrfVerifiable as Verifiable>::Members {
 		let capacity: RingSize = domain_size.into();
 
 		let (_, builder_params) = start_members_from_params(domain_size);

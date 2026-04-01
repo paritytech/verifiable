@@ -242,7 +242,7 @@ pub trait RingSuiteExt: RingSuite + Debug + 'static {
 	const MEMBERS_COMMITMENT_SIZE: usize;
 	/// Encoded size of StaticChunk (G1 point).
 	const STATIC_CHUNK_SIZE: usize;
-	/// Encoded size of IetfVrfSignature
+	/// Encoded size of Signature
 	const SIGNATURE_SIZE: usize;
 
 	/// Byte array type for encoded public keys.
@@ -347,8 +347,8 @@ macro_rules! impl_common_traits {
 /// Intermediate state while building a ring member set.
 ///
 /// Wraps a [`ark_vrf::ring::VerifierKeyBuilder`] and accumulates members via
-/// [`GenerateVerifiable::push_members`]. Finalized into a [`MembersCommitment`]
-/// via [`GenerateVerifiable::finish_members`].
+/// [`Verifiable::push_members`]. Finalized into a [`MembersCommitment`]
+/// via [`Verifiable::finish_members`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersSet<S: RingSuiteExt>(pub(crate) ark_vrf::ring::VerifierKeyBuilder<S>);
 
@@ -363,7 +363,7 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersSet<S> {
 /// Finalized commitment to a set of ring members.
 ///
 /// This is the compact representation used for proof verification. Produced by
-/// [`GenerateVerifiable::finish_members`] from a [`MembersSet`].
+/// [`Verifiable::finish_members`] from a [`MembersSet`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
 
@@ -379,14 +379,14 @@ pub(crate) type PublicKey<S> = ark_vrf::Public<S>;
 
 /// A chunk of the ring builder's static data (a G1 affine point).
 ///
-/// Used by the `lookup` function in [`GenerateVerifiable::push_members`] to supply
+/// Used by the `lookup` function in [`Verifiable::push_members`] to supply
 /// precomputed SRS points needed to update the ring commitment.
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone, Debug)]
 pub struct StaticChunk<S: RingSuiteExt>(pub ark_vrf::ring::G1Affine<S>);
 
 impl_common_traits!(StaticChunk<S: RingSuiteExt>, S::STATIC_CHUNK_SIZE);
 
-/// State produced by [`GenerateVerifiable::open`] and consumed by [`GenerateVerifiable::create`].
+/// State produced by [`Verifiable::open`] and consumed by [`Verifiable::create`].
 ///
 /// Contains the prover's position in the ring and the keying material needed to
 /// generate a ring VRF proof. This is serializable so it can be transferred to
@@ -407,15 +407,14 @@ impl<S: RingSuiteExt> core::fmt::Debug for ProverState<S> {
 }
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-struct IetfVrfSignature<S: RingSuiteExt> {
-	output: ark_vrf::Output<S>,
-	proof: ark_vrf::ietf::Proof<S>,
+struct RingVrfSignature<S: RingSuiteExt> {
+	proof: ark_vrf::ring::Proof<S>,
+	outputs: Vec<ark_vrf::Output<S>>,
 }
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-struct RingVrfSignature<S: RingSuiteExt> {
-	outputs: Vec<ark_vrf::Output<S>>,
-	proof: ark_vrf::ring::Proof<S>,
+struct PlainSignature<S: RingSuiteExt> {
+	proof: ark_vrf::ietf::Proof<S>,
 }
 
 #[inline(always)]
@@ -428,7 +427,7 @@ fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 /// The curve params provider is obtained from `S::CurveParams`.
 pub struct RingVrfVerifiable<S: RingSuiteExt>(PhantomData<S>);
 
-impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
+impl<S: RingSuiteExt> Verifiable for RingVrfVerifiable<S> {
 	type Secret = ark_vrf::Secret<S>;
 	type Commitment = ProverState<S>;
 	type Members = MembersCommitment<S>;
@@ -563,47 +562,6 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		Err(())
 	}
 
-	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
-		use ark_vrf::ietf::Prover;
-		let input_msg = [S::VRF_INPUT_DOMAIN, message].concat();
-		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let io = secret.vrf_io(input);
-
-		let proof = secret.prove(io, b"");
-		let signature = IetfVrfSignature::<S> {
-			output: io.output,
-			proof,
-		};
-
-		let mut raw = S::SignatureBytes::ZERO;
-		signature
-			.serialize_compressed(raw.as_mut())
-			.map_err(|_| ())?;
-		Ok(raw)
-	}
-
-	fn verify_signature(
-		signature: &Self::Signature,
-		message: &[u8],
-		member: &Self::Member,
-	) -> bool {
-		use ark_vrf::ietf::Verifier;
-		let Ok(signature) = IetfVrfSignature::<S>::deserialize_compressed(signature.as_ref())
-		else {
-			return false;
-		};
-		let input_msg = [S::VRF_INPUT_DOMAIN, message].concat();
-		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let Ok(public) = PublicKey::<S>::deserialize_compressed(member.as_ref()) else {
-			return false;
-		};
-		let io = VrfIo {
-			input,
-			output: signature.output,
-		};
-		public.verify(io, b"", &signature.proof).is_ok()
-	}
-
 	#[cfg(feature = "prover")]
 	fn open(
 		capacity: Self::Capacity,
@@ -682,5 +640,31 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 	fn is_member_valid(member: &Self::Member) -> bool {
 		PublicKey::<S>::deserialize_compressed(member.as_ref()).is_ok()
+	}
+
+	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
+		use ark_vrf::ietf::Prover;
+		let proof = secret.prove([], message);
+		let signature = PlainSignature::<S> { proof };
+		let mut raw = S::SignatureBytes::ZERO;
+		signature
+			.serialize_compressed(raw.as_mut())
+			.map_err(|_| ())?;
+		Ok(raw)
+	}
+
+	fn verify_signature(
+		signature: &Self::Signature,
+		message: &[u8],
+		member: &Self::Member,
+	) -> bool {
+		use ark_vrf::ietf::Verifier;
+		let Ok(signature) = PlainSignature::<S>::deserialize_compressed(signature.as_ref()) else {
+			return false;
+		};
+		let Ok(public) = PublicKey::<S>::deserialize_compressed(member.as_ref()) else {
+			return false;
+		};
+		public.verify([], message, &signature.proof).is_ok()
 	}
 }

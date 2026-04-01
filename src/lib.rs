@@ -35,7 +35,7 @@ pub type Entropy = [u8; 32];
 ///
 /// Groups together a proof with the context and message it was created for,
 /// so that multiple proofs can be validated in a single batch operation via
-/// [`GenerateVerifiable::batch_validate`].
+/// [`Verifiable::batch_validate`].
 #[derive(Clone)]
 pub struct BatchProofItem<Proof> {
 	/// The ring VRF proof to validate.
@@ -60,27 +60,32 @@ pub struct BatchProofItem<Proof> {
 ///
 /// A convenience [`Receipt`] type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
-pub trait GenerateVerifiable {
+pub trait Verifiable {
 	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
 	///
 	/// This is envisioned to be stored on-chain and passed between chains.
 	type Members: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
+
 	/// Intermediate value while building a `Self::Members` value. Probably just an unfinished Ring
 	/// Root(?).
 	///
 	/// This is envisioned to be stored on-chain.
 	type Intermediate: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
+
 	/// Encoded value identifying a single member. Corresponds to the user representation of a Public Key.
 	type Member: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
+
 	/// Value with which a member can create a proof of membership. Corresponds to the Secret Key.
 	///
 	/// This is not envisioned to be used on-chain.
 	type Secret: Clone;
+
 	/// A partially-created proof. This is created by the `open` function and utilized by the
 	/// `create` function.
 	///
 	/// This is not envisioned to be used on-chain.
 	type Commitment: FullCodec;
+
 	/// A proof of membership in a group, verifiable against `Members`.
 	///
 	/// Created via the two-step `open`/`create` flow. The verifier learns only the
@@ -88,11 +93,6 @@ pub trait GenerateVerifiable {
 	///
 	/// This is expected to be passed on-chain as a parameter, but never stored.
 	type Proof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
-	/// A signature attributable to a specific `Member`, verifiable against that member's
-	/// public key.
-	///
-	/// Created via `sign`, verified via `verify_signature`.
-	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	/// A chunk of precomputed static data used by the `lookup` function when pushing members.
 	///
@@ -102,6 +102,12 @@ pub trait GenerateVerifiable {
 	/// The capacity type used to parametrize ring operations.
 	/// Must implement the `Capacity` trait which provides `size()`.
 	type Capacity: Clone + Copy + Capacity;
+
+	/// A signature attributable to a specific `Member`, verifiable against that member's
+	/// public key.
+	///
+	/// Created via `sign`, verified via `verify_signature`.
+	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
 	/// Begin building a `Members` value.
 	fn start_members(capacity: Self::Capacity) -> Self::Intermediate;
@@ -190,11 +196,6 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> Result<(Self::Proof, Vec<Alias>), ()>;
 
-	/// Make a non-anonymous signature of `message` using `secret`.
-	fn sign(_secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
-		Err(())
-	}
-
 	/// Check whether `self` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
 	/// that they elected to opine `message`.
@@ -246,36 +247,30 @@ pub trait GenerateVerifiable {
 
 	/// Like `is_valid_multi_context`, but aliases are returned, not provided.
 	fn validate_multi_context(
-		_capacity: Self::Capacity,
-		_proof: &Self::Proof,
-		_members: &Self::Members,
-		_contexts: &[&[u8]],
-		_message: &[u8],
-	) -> Result<Vec<Alias>, ()> {
-		Err(())
-	}
+		capacity: Self::Capacity,
+		proof: &Self::Proof,
+		members: &Self::Members,
+		contexts: &[&[u8]],
+		message: &[u8],
+	) -> Result<Vec<Alias>, ()>;
 
 	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
 	/// in order of input.
 	fn batch_validate(
-		_capacity: Self::Capacity,
-		_members: &Self::Members,
-		_proofs: &[BatchProofItem<Self::Proof>],
-	) -> Result<Vec<Alias>, ()> {
-		Err(())
-	}
-
-	/// Verify a non-anonymous signature of `message` against the given `member`'s public key.
-	fn verify_signature(
-		_signature: &Self::Signature,
-		_message: &[u8],
-		_member: &Self::Member,
-	) -> bool {
-		false
-	}
+		capacity: Self::Capacity,
+		members: &Self::Members,
+		proofs: &[BatchProofItem<Self::Proof>],
+	) -> Result<Vec<Alias>, ()>;
 
 	/// Check whether `member` is a valid encoded public key for this scheme.
 	fn is_member_valid(_member: &Self::Member) -> bool;
+
+	/// Make a non-anonymous signature of `message` using `secret`.
+	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()>;
+
+	/// Verify a non-anonymous signature of `message` against the given `member`'s public key.
+	fn verify_signature(signature: &Self::Signature, message: &[u8], member: &Self::Member)
+		-> bool;
 }
 
 /// Convenience wrapper bundling a proof with its associated alias and message.
@@ -283,16 +278,16 @@ pub trait GenerateVerifiable {
 /// Provides a simpler API for the common create-then-verify workflow via
 /// [`Receipt::create`] and [`Receipt::verify`].
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, DecodeWithMemTracking)]
-pub struct Receipt<Gen: GenerateVerifiable> {
+pub struct Receipt<Gen: Verifiable> {
 	proof: Gen::Proof,
 	alias: Alias,
 	message: Vec<u8>,
 }
 
-impl<Gen: GenerateVerifiable> Receipt<Gen> {
+impl<Gen: Verifiable> Receipt<Gen> {
 	/// Create a receipt by opening a commitment and producing a proof in one step.
 	///
-	/// Combines [`GenerateVerifiable::open`] and [`GenerateVerifiable::create`].
+	/// Combines [`Verifiable::open`] and [`Verifiable::create`].
 	#[cfg(feature = "prover")]
 	pub fn create<'a>(
 		capacity: Gen::Capacity,
