@@ -435,7 +435,6 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Intermediate = MembersSet<S>;
 	type Member = S::PublicKeyBytes;
 	type Proof = Vec<u8>;
-	type MultiContextProof = Vec<u8>;
 	type Signature = S::SignatureBytes;
 	type StaticChunk = StaticChunk<S>;
 	type Capacity = RingSize<S>;

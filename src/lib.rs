@@ -89,13 +89,6 @@ pub trait GenerateVerifiable {
 	///
 	/// This is expected to be passed on-chain as a parameter, but never stored.
 	type Proof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
-	/// A proof of membership in a group, verifiable against `Members`.
-	///
-	/// This kind of proof is created in two steps using [Self::open] and then [Self::create_multi_context]
-	/// and later can be verified by [Self::is_valid_multi_context] or [Self::validate_multi_context].
-	///
-	/// In general, this proof is the same as [Self::Proof] but represents a multi-context proof.
-	type MultiContextProof: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 	/// A signature attributable to a specific `Member`, verifiable against that member's
 	/// public key.
 	///
@@ -193,7 +186,7 @@ pub trait GenerateVerifiable {
 		secret: &Self::Secret,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()>;
+	) -> Result<(Self::Proof, Vec<Alias>), ()>;
 
 	/// Make a non-anonymous signature of `message` using `secret`.
 	fn sign(_secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
@@ -222,7 +215,7 @@ pub trait GenerateVerifiable {
 	/// that they elected to opine `message`.
 	fn is_valid_multi_context(
 		capacity: Self::Capacity,
-		proof: &Self::MultiContextProof,
+		proof: &Self::Proof,
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		aliases: &[Alias],
@@ -251,7 +244,7 @@ pub trait GenerateVerifiable {
 	/// Like `is_valid_multi_context`, but aliases are returned, not provided.
 	fn validate_multi_context(
 		_capacity: Self::Capacity,
-		_proof: &Self::MultiContextProof,
+		_proof: &Self::Proof,
 		_members: &Self::Members,
 		_contexts: &[&[u8]],
 		_message: &[u8],
