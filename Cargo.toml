@@ -10,10 +10,9 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 exclude = ["src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin"]
 
 [dependencies]
-bounded-collections = { version = "0.1.8", default-features = false }
+bounded-collections = { version = "0.1.8", default-features = false, optional = true }
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
-schnorrkel = { version = "0.11.5", default-features = false, optional = true }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.3.0", default-features = false, features = ["bandersnatch", "ring"] }
@@ -32,10 +31,9 @@ path = "utils/generate_test_keys.rs"
 default = ["std"]
 std = [
     "prover",
-    "bounded-collections/std",
+    "bounded-collections?/std",
     "parity-scale-codec/std",
     "scale-info/std",
-    "schnorrkel?/std",
     "ark-serialize/std",
     "ark-scale/std",
     "ark-vrf/std",
@@ -53,4 +51,4 @@ no-std-prover = [
     "prover",
     "ark-vrf/test-vectors",
 ]
-schnorrkel = ["dep:schnorrkel"]
+testing = ["bounded-collections"]

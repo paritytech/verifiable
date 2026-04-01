@@ -1,38 +1,63 @@
+//! Simple (insecure) implementation of [`Verifiable`] for illustration and testing.
+//!
+//! This module provides a toy implementation that demonstrates how to implement
+//! the trait. It has no real cryptographic properties -- the "alias" is just
+//! a hash of (secret, context) and the "proof" bundles those aliases with the
+//! member identity. Do not use in production.
+
 use super::*;
 use bounded_collections::{BoundedVec, ConstU32};
-#[cfg(feature = "schnorrkel")]
-use schnorrkel::{signing_context, ExpansionMode, MiniSecretKey, PublicKey};
 
-/// [`Capacity`] impl for demo implementations that don't use ring VRF.
-/// Always returns a fixed size of 1024.
+const MAX_MEMBERS: u32 = 1024;
+
+/// [`Capacity`] impl for the simple demo (no ring VRF).
 impl Capacity for () {
 	fn size(&self) -> usize {
-		1024
+		MAX_MEMBERS as usize
 	}
 }
 
-// Example impls:
+fn simple_hash(data: &[&[u8]]) -> [u8; 32] {
+	// Poor man's hash: XOR-fold all input bytes into a 32-byte block.
+	// Not collision-resistant -- just enough for a demo.
+	let mut out = [0u8; 32];
+	let mut pos = 0usize;
+	for chunk in data {
+		for &byte in *chunk {
+			out[pos % 32] ^= byte;
+			pos += 1;
+		}
+	}
+	out
+}
 
-/// Totally insecure Anonymizer: Member and Secret are both the same `[u8; 32]` and the proof is
-/// just the identity. The `alias` is always the identity and the root is just a `Vec<Self::Member>`.
-/// Verification just checks that the proof and the alias are the same and that the alias exists
-/// in the "root" (just a Vec).
-pub struct Trivial;
-impl GenerateVerifiable for Trivial {
-	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
-	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
+fn simple_alias(secret: &[u8; 32], context: &[u8]) -> Alias {
+	simple_hash(&[secret, context])
+}
+
+/// Proof for [`Simple`]: a tuple of (member, aliases) where aliases are one per context.
+pub type SimpleProof = ([u8; 32], Vec<Alias>);
+
+/// Toy [`Verifiable`] implementation.
+///
+/// - Secret and Member are both `[u8; 32]` (member = secret, i.e. no real key derivation).
+/// - Alias is `hash(secret, context)`.
+/// - Proof is `(member, aliases)` -- verification just checks the member is in the set
+///   and the aliases match.
+/// - Signature is the secret itself (anyone who knows the secret can forge it).
+#[derive(Debug)]
+pub struct Simple;
+
+impl Verifiable for Simple {
+	type Members = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
+	type Intermediate = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
-	type Proof = [u8; 32];
-	type MultiContextProof = Vec<Self::Proof>;
+	type Proof = SimpleProof;
 	type Signature = [u8; 32];
 	type StaticChunk = ();
 	type Capacity = ();
-
-	fn is_member_valid(_member: &Self::Member) -> bool {
-		true
-	}
 
 	fn start_members(_capacity: ()) -> Self::Intermediate {
 		BoundedVec::new()
@@ -44,10 +69,11 @@ impl GenerateVerifiable for Trivial {
 		_lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
 	) -> Result<(), ()> {
 		for member in members {
-			inter.try_push(member).map_err(|_| ())?
+			inter.try_push(member).map_err(|_| ())?;
 		}
 		Ok(())
 	}
+
 	fn finish_members(inter: Self::Intermediate) -> Self::Members {
 		inter
 	}
@@ -74,61 +100,58 @@ impl GenerateVerifiable for Trivial {
 	}
 
 	#[cfg(feature = "prover")]
-	fn create(
+	fn create_multi_context(
 		(member, _): Self::Commitment,
 		secret: &Self::Secret,
-		_context: &[u8],
+		contexts: &[&[u8]],
 		_message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
+	) -> Result<(Self::Proof, Vec<Alias>), ()> {
 		if &member != secret {
 			return Err(());
 		}
-		Ok((*secret, *secret))
-	}
-
-	#[cfg(feature = "prover")]
-	fn create_multi_context(
-		commitment: Self::Commitment,
-		secret: &Self::Secret,
-		contexts: &[&[u8]],
-		message: &[u8],
-	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()> {
-		contexts
+		let aliases: Vec<Alias> = contexts
 			.iter()
-			.map(|ctx| Self::create(commitment.clone(), secret, ctx, message))
-			.collect()
-	}
-
-	fn validate(
-		_capacity: (),
-		proof: &Self::Proof,
-		members: &Self::Members,
-		_context: &[u8],
-		_message: &[u8],
-	) -> Result<Alias, ()> {
-		if members.contains(proof) {
-			Ok(*proof)
-		} else {
-			Err(())
-		}
+			.map(|ctx| simple_alias(secret, ctx))
+			.collect();
+		Ok(((member, aliases.clone()), aliases))
 	}
 
 	fn validate_multi_context(
-		capacity: Self::Capacity,
-		proof: &Self::MultiContextProof,
+		_capacity: Self::Capacity,
+		proof: &Self::Proof,
 		members: &Self::Members,
 		contexts: &[&[u8]],
-		message: &[u8],
+		_message: &[u8],
 	) -> Result<Vec<Alias>, ()> {
-		proof
+		let (member, aliases) = proof;
+		if !members.contains(member) {
+			return Err(());
+		}
+		if aliases.len() != contexts.len() {
+			return Err(());
+		}
+		Ok(aliases.clone())
+	}
+
+	fn batch_validate(
+		capacity: Self::Capacity,
+		members: &Self::Members,
+		proofs: &[BatchProofItem<Self::Proof>],
+	) -> Result<Vec<Alias>, ()> {
+		proofs
 			.iter()
-			.zip(contexts.iter())
-			.map(|(proof, ctx)| Self::validate(capacity, proof, members, ctx, message))
+			.map(|item| {
+				Self::validate(capacity, &item.proof, members, &item.context, &item.message)
+			})
 			.collect()
 	}
 
-	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
-		Ok(*secret)
+	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
+		Ok(simple_alias(secret, context))
+	}
+
+	fn is_member_valid(_member: &Self::Member) -> bool {
+		true
 	}
 
 	fn sign(secret: &Self::Secret, _message: &[u8]) -> Result<Self::Signature, ()> {
@@ -144,192 +167,29 @@ impl GenerateVerifiable for Trivial {
 	}
 }
 
-#[cfg(feature = "schnorrkel")]
-const SIG_CON: &[u8] = b"verifiable";
-
-/// Example impl of `Verifiable` which uses Schnorrkel. This doesn't anonymise anything.
-#[cfg(feature = "schnorrkel")]
-#[derive(
-	Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking,
-)]
-pub struct Simple;
-#[cfg(feature = "schnorrkel")]
-impl GenerateVerifiable for Simple {
-	type Members = BoundedVec<Self::Member, ConstU32<1024>>;
-	type Intermediate = BoundedVec<Self::Member, ConstU32<1024>>;
-	type Member = [u8; 32];
-	type Secret = [u8; 32];
-	type Commitment = (Self::Member, Vec<Self::Member>);
-	type Proof = ([u8; 64], Alias);
-	type MultiContextProof = Vec<Self::Proof>;
-	type Signature = [u8; 64];
-	type StaticChunk = ();
-	type Capacity = ();
-
-	fn is_member_valid(_member: &Self::Member) -> bool {
-		true
-	}
-
-	fn start_members(_capacity: ()) -> Self::Intermediate {
-		BoundedVec::new()
-	}
-
-	fn push_members(
-		inter: &mut Self::Intermediate,
-		members: impl Iterator<Item = Self::Member>,
-		_lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
-	) -> Result<(), ()> {
-		for member in members {
-			inter.try_push(member).map_err(|_| ())?
-		}
-		Ok(())
-	}
-	fn finish_members(inter: Self::Intermediate) -> Self::Members {
-		inter
-	}
-
-	fn new_secret(entropy: Entropy) -> Self::Secret {
-		entropy
-	}
-
-	fn member_from_secret(secret: &Self::Secret) -> Self::Member {
-		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
-		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
-		pair.public.to_bytes()
-	}
-
-	#[cfg(feature = "prover")]
-	fn open(
-		_capacity: (),
-		member: &Self::Member,
-		members: impl Iterator<Item = Self::Member>,
-	) -> Result<Self::Commitment, ()> {
-		let set = members.collect::<Vec<_>>();
-		if !set.contains(member) {
-			return Err(());
-		}
-		Ok((*member, set))
-	}
-
-	#[cfg(feature = "prover")]
-	fn create(
-		(member, _): Self::Commitment,
-		secret: &Self::Secret,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
-		let public = Self::member_from_secret(secret);
-		if member != public {
-			return Err(());
-		}
-
-		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
-		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
-
-		let sig = (context, message)
-			.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
-		Ok(((sig, public), public))
-	}
-
-	#[cfg(feature = "prover")]
-	fn create_multi_context(
-		commitment: Self::Commitment,
-		secret: &Self::Secret,
-		contexts: &[&[u8]],
-		message: &[u8],
-	) -> Result<(Self::MultiContextProof, Vec<Alias>), ()> {
-		contexts
-			.iter()
-			.map(|ctx| Self::create(commitment.clone(), secret, ctx, message))
-			.collect()
-	}
-
-	fn validate(
-		_capacity: (),
-		proof: &Self::Proof,
-		members: &Self::Members,
-		context: &[u8],
-		message: &[u8],
-	) -> Result<Alias, ()> {
-		if !members.contains(&proof.1) {
-			return Err(());
-		}
-		let s = schnorrkel::Signature::from_bytes(&proof.0).unwrap();
-		let p = PublicKey::from_bytes(&proof.1).unwrap();
-		(context, message).using_encoded(|b| {
-			p.verify_simple(SIG_CON, b, &s)
-				.map(|_| proof.1)
-				.map_err(|_| ())
-		})
-	}
-
-	fn validate_multi_context(
-		capacity: Self::Capacity,
-		proof: &Self::MultiContextProof,
-		members: &Self::Members,
-		contexts: &[&[u8]],
-		message: &[u8],
-	) -> Result<Vec<Alias>, ()> {
-		proof
-			.iter()
-			.zip(contexts.iter())
-			.map(|(proof, ctx)| Self::validate(capacity, proof, members, ctx, message))
-			.collect()
-	}
-
-	fn alias_in_context(secret: &Self::Secret, _context: &[u8]) -> Result<Alias, ()> {
-		Ok(Self::member_from_secret(secret))
-	}
-
-	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
-		let secret = MiniSecretKey::from_bytes(&secret[..]).unwrap();
-		let pair = secret.expand_to_keypair(ExpansionMode::Ed25519);
-
-		let sig = ("no-ctxt", message)
-			.using_encoded(|b| pair.sign(signing_context(SIG_CON).bytes(b)).to_bytes());
-
-		Ok(sig)
-	}
-	fn verify_signature(
-		signature: &Self::Signature,
-		message: &[u8],
-		member: &Self::Member,
-	) -> bool {
-		let p = PublicKey::from_bytes(&member[..]).unwrap();
-		let s = schnorrkel::Signature::from_bytes(&signature[..]).unwrap();
-		("no-ctxt", message).using_encoded(|b| p.verify_simple(SIG_CON, b, &s).is_ok())
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
 
-	#[cfg(all(feature = "schnorrkel", feature = "prover"))]
+	#[cfg(feature = "prover")]
 	#[test]
-	fn simple_works() {
-		let alice_sec = <Simple as GenerateVerifiable>::new_secret([0u8; 32]);
-		let bob_sec = <Simple as GenerateVerifiable>::new_secret([1u8; 32]);
-		let charlie_sec = <Simple as GenerateVerifiable>::new_secret([2u8; 32]);
-		let alice = <Simple as GenerateVerifiable>::member_from_secret(&alice_sec);
-		let bob = <Simple as GenerateVerifiable>::member_from_secret(&bob_sec);
+	fn simple_create_and_verify() {
+		let alice_sec = Simple::new_secret([0u8; 32]);
+		let bob_sec = Simple::new_secret([1u8; 32]);
+		let charlie_sec = Simple::new_secret([2u8; 32]);
+		let alice = Simple::member_from_secret(&alice_sec);
+		let bob = Simple::member_from_secret(&bob_sec);
 
-		let mut inter = <Simple as GenerateVerifiable>::start_members(());
-		<Simple as GenerateVerifiable>::push_members(&mut inter, [alice].into_iter(), |_| {
-			Ok(alloc::vec![()])
-		})
-		.unwrap();
-		<Simple as GenerateVerifiable>::push_members(&mut inter, [bob].into_iter(), |_| {
-			Ok(alloc::vec![()])
-		})
-		.unwrap();
-		let members = <Simple as GenerateVerifiable>::finish_members(inter);
+		let mut inter = Simple::start_members(());
+		Simple::push_members(&mut inter, [alice, bob].into_iter(), |_| Ok(vec![()])).unwrap();
+		let members = Simple::finish_members(inter);
 
+		let context = b"ctx";
+		let message = b"hello";
+
+		// Alice can create and verify a proof.
 		type SimpleReceipt = Receipt<Simple>;
-		let context = &b"My context"[..];
-		let message = b"Hello world";
-
-		let r = SimpleReceipt::create(
+		let receipt = SimpleReceipt::create(
 			(),
 			&alice_sec,
 			members.iter().cloned(),
@@ -337,109 +197,52 @@ mod tests {
 			message.to_vec(),
 		)
 		.unwrap();
-		let (alias, msg) = r.verify((), &members, context).unwrap();
-		assert_eq!(&message[..], &msg[..]);
-		assert_eq!(alias, alice);
+		let (alias, msg) = receipt.verify((), &members, context).unwrap();
+		assert_eq!(&msg, message);
+		assert_eq!(alias, simple_alias(&alice_sec, context));
 
-		let r = SimpleReceipt::create(
-			(),
-			&bob_sec,
-			members.iter().cloned(),
-			context,
-			message.to_vec(),
-		)
-		.unwrap();
-		let (alias, msg) = r.verify((), &members, context).unwrap();
-		assert_eq!(&message[..], &msg[..]);
-		assert_eq!(alias, bob);
-
+		// Charlie (not a member) cannot create a proof.
 		assert!(SimpleReceipt::create(
 			(),
 			&charlie_sec,
 			members.iter().cloned(),
 			context,
-			message.to_vec()
+			message.to_vec(),
 		)
 		.is_err());
 	}
 
-	#[cfg(feature = "schnorrkel")]
-	const SIG_CON: &[u8] = b"test";
-
-	#[cfg(feature = "schnorrkel")]
+	#[cfg(feature = "prover")]
 	#[test]
-	fn simple_crypto() {
-		let secret = [0; 32];
-		let keypair = MiniSecretKey::from_bytes(&secret[..])
-			.unwrap()
-			.expand_to_keypair(ExpansionMode::Ed25519);
-		let public: [u8; 32] = keypair.public.to_bytes();
-		let message = b"Hello world!";
-		let sig = keypair
-			.sign(signing_context(SIG_CON).bytes(&message[..]))
-			.to_bytes();
+	fn simple_multi_context() {
+		let secret = Simple::new_secret([0u8; 32]);
+		let member = Simple::member_from_secret(&secret);
 
-		let ok = {
-			let s = schnorrkel::Signature::from_bytes(&sig).unwrap();
-			let p = PublicKey::from_bytes(&public).unwrap();
-			p.verify_simple(SIG_CON, &message[..], &s).is_ok()
-		};
-		assert!(ok);
+		let mut inter = Simple::start_members(());
+		Simple::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).unwrap();
+		let members = Simple::finish_members(inter);
 
-		let mut sig = sig;
-		sig[0] ^= 1;
+		let contexts: Vec<&[u8]> = vec![b"ctx1", b"ctx2"];
+		let commitment = Simple::open((), &member, members.iter().cloned()).unwrap();
+		let (proof, aliases) =
+			Simple::create_multi_context(commitment, &secret, &contexts, b"msg").unwrap();
 
-		let ok = {
-			let s = schnorrkel::Signature::from_bytes(&sig).unwrap();
-			let p = PublicKey::from_bytes(&public).unwrap();
-			p.verify_simple(SIG_CON, &message[..], &s).is_ok()
-		};
-		assert!(!ok);
+		assert_eq!(aliases.len(), 2);
+		assert!(Simple::is_valid_multi_context(
+			(),
+			&proof,
+			&members,
+			&contexts,
+			&aliases,
+			b"msg"
+		));
 	}
 
 	#[test]
-	fn trivial_signature_works() {
-		let secret = [0; 32];
-		let member = <Trivial as GenerateVerifiable>::member_from_secret(&secret);
-		let signature = <Trivial as GenerateVerifiable>::sign(&secret, b"Hello world").unwrap();
-		assert!(<Trivial as GenerateVerifiable>::verify_signature(
-			&signature,
-			b"Hello world",
-			&member
-		));
-	}
-
-	#[cfg(feature = "schnorrkel")]
-	#[test]
-	fn simple_signature_works() {
-		let secret = [0; 32];
-		let member = <Simple as GenerateVerifiable>::member_from_secret(&secret);
-		let signature = <Simple as GenerateVerifiable>::sign(&secret, b"Hello world").unwrap();
-
-		let another_secrect = [1; 32];
-		let another_member = <Simple as GenerateVerifiable>::member_from_secret(&another_secrect);
-		let another_signature =
-			<Simple as GenerateVerifiable>::sign(&another_secrect, b"Hello world").unwrap();
-
-		assert!(<Simple as GenerateVerifiable>::verify_signature(
-			&signature,
-			b"Hello world",
-			&member
-		));
-		assert!(!<Simple as GenerateVerifiable>::verify_signature(
-			&signature,
-			b"Hello world",
-			&another_member
-		));
-		assert!(!<Simple as GenerateVerifiable>::verify_signature(
-			&signature,
-			b"No hello",
-			&member
-		));
-		assert!(!<Simple as GenerateVerifiable>::verify_signature(
-			&another_signature,
-			b"Hello world",
-			&member
-		));
+	fn simple_signature() {
+		let secret = Simple::new_secret([42u8; 32]);
+		let member = Simple::member_from_secret(&secret);
+		let sig = Simple::sign(&secret, b"msg").unwrap();
+		assert!(Simple::verify_signature(&sig, b"msg", &member));
 	}
 }

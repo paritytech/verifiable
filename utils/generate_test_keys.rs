@@ -1,6 +1,6 @@
 use rand::RngCore;
 use verifiable::ring::bandersnatch::BandersnatchVrfVerifiable;
-use verifiable::GenerateVerifiable;
+use verifiable::Verifiable;
 
 const PROOF_PREFIX: &[u8] = b"pop register using";
 const VOUCHER_NAMES: [&str; 2] = ["TEST_VOUCHER_KEY_1", "TEST_VOUCHER_KEY_2"];
@@ -25,7 +25,7 @@ fn print_byte_array(name: &str, data: &[u8]) {
 	println!();
 }
 
-fn validate_keys(member: &[u8; 32], message: &[u8], signature: &[u8; 96]) {
+fn validate_keys(member: &[u8; 32], message: &[u8], signature: &[u8; 48]) {
 	let is_valid = BandersnatchVrfVerifiable::verify_signature(signature, message, member);
 
 	if is_valid {
