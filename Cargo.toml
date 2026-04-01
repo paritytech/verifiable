@@ -10,7 +10,6 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 exclude = ["src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin"]
 
 [dependencies]
-bounded-collections = { version = "0.1.8", default-features = false }
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
@@ -31,7 +30,6 @@ path = "utils/generate_test_keys.rs"
 default = ["std"]
 std = [
     "prover",
-    "bounded-collections/std",
     "parity-scale-codec/std",
     "scale-info/std",
     "ark-serialize/std",
