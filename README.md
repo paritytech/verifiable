@@ -47,6 +47,7 @@ supporting up to 16127 members.
 | `prover` | Proof generation (`open`, `create`, `create_multi_context`) |
 | `builder-params` | Includes precomputed ring builder params for building ring commitments |
 | `no-std-prover` | Deterministic prover for `no_std` environments (testing only) |
+| `testing` | Exposes the `demo` module with a toy `Simple` implementation for tests |
 
 For verifier-only builds (e.g. on-chain), disable default features.
 

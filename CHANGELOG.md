@@ -15,8 +15,9 @@ All notable changes to this project will be documented in this file.
 - **Simplify trait API** ([#40](https://github.com/paritytech/verifiable/pull/40))
   - `create` and `validate` are now provided methods delegating to their multi-context counterparts
   - Plain signatures use IETF VRF proof directly (no VRF output), reducing signature size from 96 to 48 bytes
-  - Removed `schnorrkel` and `bounded-collections` dependencies
-  - Removed demo module (`Simple` and `Trivial` implementations)
+  - Removed `schnorrkel` dependency
+  - Replaced `Simple` (schnorrkel) and `Trivial` demo implementations with a new dependency-free `Simple` demo
+  - Demo module now gated behind the `testing` feature
 - **Use uncompressed-unchecked codec for trusted domain types** ([#34](https://github.com/paritytech/verifiable/pull/34))
 
 ### Added
