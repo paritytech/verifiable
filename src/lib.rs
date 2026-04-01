@@ -173,8 +173,7 @@ pub trait GenerateVerifiable {
 		context: &[u8],
 		message: &[u8],
 	) -> Result<(Self::Proof, Alias), ()> {
-		let (proof, aliases) =
-			Self::create_multi_context(commitment, secret, &[context], message)?;
+		let (proof, aliases) = Self::create_multi_context(commitment, secret, &[context], message)?;
 		Ok((proof, aliases[0]))
 	}
 
