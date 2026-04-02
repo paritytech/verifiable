@@ -1,4 +1,4 @@
-//! Simple (insecure) implementation of [`Verifiable`] for illustration and testing.
+//! Simple (insecure) implementation of [`GenerateVerifiable`] for illustration and testing.
 //!
 //! This module provides a toy implementation that demonstrates how to implement
 //! the trait. It has no real cryptographic properties -- the "alias" is just
@@ -39,7 +39,7 @@ fn simple_alias(secret: &[u8; 32], context: &[u8]) -> Alias {
 /// Proof for [`Simple`]: a tuple of (member, aliases) where aliases are one per context.
 pub type SimpleProof = ([u8; 32], BoundedVec<Alias, ConstU32<MAX_CONTEXTS>>);
 
-/// Toy [`Verifiable`] implementation.
+/// Toy [`GenerateVerifiable`] implementation.
 ///
 /// - Secret and Member are both `[u8; 32]` (member = secret, i.e. no real key derivation).
 /// - Alias is `hash(secret, context)`.
@@ -49,7 +49,7 @@ pub type SimpleProof = ([u8; 32], BoundedVec<Alias, ConstU32<MAX_CONTEXTS>>);
 #[derive(Debug)]
 pub struct Simple;
 
-impl Verifiable for Simple {
+impl GenerateVerifiable for Simple {
 	type Members = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
 	type Member = [u8; 32];

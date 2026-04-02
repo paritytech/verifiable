@@ -60,7 +60,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		ring::{ring_signature_size, RingSize},
-		Capacity, Verifiable,
+		Capacity, GenerateVerifiable,
 	};
 
 	// Type aliases for Bandersnatch-specific generic types
@@ -205,7 +205,7 @@ mod tests {
 
 #[cfg(test)]
 mod builder_tests {
-	use crate::{ring::ring_verifier_builder_params, Capacity, Verifiable};
+	use crate::{ring::ring_verifier_builder_params, Capacity, GenerateVerifiable};
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
@@ -972,9 +972,9 @@ mod builder_tests {
 	});
 
 	fn build_members(
-		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as Verifiable>::Member>,
+		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as GenerateVerifiable>::Member>,
 		domain_size: RingDomainSize,
-	) -> <BandersnatchVrfVerifiable as Verifiable>::Members {
+	) -> <BandersnatchVrfVerifiable as GenerateVerifiable>::Members {
 		let capacity: RingSize = domain_size.into();
 
 		let (_, builder_params) = start_members_from_params(domain_size);
