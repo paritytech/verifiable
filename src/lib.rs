@@ -258,14 +258,24 @@ pub trait Verifiable {
 
 	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
 	/// in order of input.
+	///
+	/// Currently only supports single-context proofs. Multi-context proofs should be
+	/// validated individually via [`Self::validate_multi_context`].
 	fn batch_validate(
 		capacity: Self::Capacity,
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
-	) -> Result<Vec<Alias>, ()>;
+	) -> Result<Vec<Alias>, ()> {
+		proofs
+			.iter()
+			.map(|item| {
+				Self::validate(capacity, &item.proof, members, &item.context, &item.message)
+			})
+			.collect()
+	}
 
 	/// Check whether `member` is a valid encoded public key for this scheme.
-	fn is_member_valid(_member: &Self::Member) -> bool;
+	fn is_member_valid(member: &Self::Member) -> bool;
 
 	/// Make a non-anonymous signature of `message` using `secret`.
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()>;
