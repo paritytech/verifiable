@@ -1,5 +1,5 @@
 use alloc::vec;
-use core::{marker::PhantomData, ops::Range};
+use core::{marker::PhantomData, ops::Deref, ops::Range};
 
 pub use ark_vrf;
 
