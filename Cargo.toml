@@ -10,7 +10,7 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 exclude = ["src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin"]
 
 [dependencies]
-bounded-collections = { version = "0.3.2", default-features = false }
+bounded-collections = { version = "0.3.2", default-features = false, features = ["scale-codec"] }
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
