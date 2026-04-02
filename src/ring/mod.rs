@@ -3,11 +3,12 @@ use core::{marker::PhantomData, ops::Deref, ops::Range};
 
 pub use ark_vrf;
 
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
 	ring::{RingSuite, Verifier},
 	VrfIo,
 };
+use bounded_collections::{BoundedVec, Get};
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
@@ -242,8 +243,14 @@ pub trait RingSuiteExt: RingSuite + Debug + 'static {
 	const MEMBERS_COMMITMENT_SIZE: usize;
 	/// Encoded size of StaticChunk (G1 point).
 	const STATIC_CHUNK_SIZE: usize;
-	/// Encoded size of Signature
+	/// Encoded size of Signature.
 	const SIGNATURE_SIZE: usize;
+	/// Compressed size of `ark_vrf::ring::Proof<S>`.
+	const RING_PROOF_SIZE: usize;
+	/// Compressed size of a single `ark_vrf::Output<S>`.
+	const VRF_OUTPUT_SIZE: usize;
+	/// Maximum number of VRF contexts in a multi-context proof.
+	const MAX_VRF_CONTEXTS: u8;
 
 	/// Byte array type for encoded public keys.
 	type PublicKeyBytes: FixedBytes;
@@ -256,6 +263,22 @@ pub trait RingSuiteExt: RingSuite + Debug + 'static {
 	/// Cache strategy for ring proof params.
 	#[cfg(feature = "prover")]
 	type ParamsCache: RingProofParamsCache<Self>;
+}
+
+/// Serialized ring VRF signature size for a given number of contexts.
+pub const fn ring_signature_size<S: RingSuiteExt>(contexts_count: u8) -> usize {
+	S::RING_PROOF_SIZE + 1 + contexts_count as usize * S::VRF_OUTPUT_SIZE
+}
+
+/// [`Get<u32>`] implementation that computes the maximum proof byte length for a suite.
+///
+/// Used as the bound for `BoundedVec<u8, MaxRingVrfSignatureLen<S>>`.
+pub struct MaxRingVrfSignatureLen<S: RingSuiteExt>(PhantomData<S>);
+
+impl<S: RingSuiteExt> Get<u32> for MaxRingVrfSignatureLen<S> {
+	fn get() -> u32 {
+		ring_signature_size::<S>(S::MAX_VRF_CONTEXTS) as u32
+	}
 }
 
 macro_rules! impl_common_traits {
@@ -406,10 +429,93 @@ impl<S: RingSuiteExt> core::fmt::Debug for ProverState<S> {
 	}
 }
 
+/// VRF outputs within a ring signature.
+///
+/// For the common single-context case, the output is stored inline on the stack.
+/// For multi-context proofs, outputs are heap-allocated.
+///
+/// The wire format uses a `u8` length prefix followed by the outputs (no enum
+/// discriminant). On deserialization, length == 1 produces `Single`, length > 1
+/// produces `Multi`.
+enum RingVrfOutputs<S: RingSuiteExt> {
+	Single(ark_vrf::Output<S>),
+	Multi(Vec<ark_vrf::Output<S>>),
+}
+
+impl<S: RingSuiteExt> RingVrfOutputs<S> {
+	fn as_slice(&self) -> &[ark_vrf::Output<S>] {
+		match self {
+			Self::Single(o) => core::slice::from_ref(o),
+			Self::Multi(v) => v.as_slice(),
+		}
+	}
+}
+
+impl<S: RingSuiteExt> ark_serialize::Valid for RingVrfOutputs<S> {
+	fn check(&self) -> Result<(), ark_serialize::SerializationError> {
+		ark_vrf::Output::<S>::batch_check(self.as_slice().iter())
+	}
+}
+
+impl<S: RingSuiteExt> CanonicalSerialize for RingVrfOutputs<S> {
+	fn serialize_with_mode<W: ark_serialize::Write>(
+		&self,
+		mut writer: W,
+		compress: ark_serialize::Compress,
+	) -> Result<(), ark_serialize::SerializationError> {
+		let slice = self.as_slice();
+		(slice.len() as u8).serialize_with_mode(&mut writer, compress)?;
+		for output in slice {
+			output.serialize_with_mode(&mut writer, compress)?;
+		}
+		Ok(())
+	}
+
+	fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
+		let slice = self.as_slice();
+		let item_size = slice
+			.iter()
+			.next()
+			.map_or(0, |o| o.serialized_size(compress));
+		1 + slice.len() * item_size
+	}
+}
+
+impl<S: RingSuiteExt> CanonicalDeserialize for RingVrfOutputs<S> {
+	fn deserialize_with_mode<R: ark_serialize::Read>(
+		mut reader: R,
+		compress: ark_serialize::Compress,
+		validate: ark_serialize::Validate,
+	) -> Result<Self, ark_serialize::SerializationError> {
+		let len = u8::deserialize_with_mode(&mut reader, compress, validate)?;
+		if len > S::MAX_VRF_CONTEXTS {
+			return Err(ark_serialize::SerializationError::InvalidData);
+		}
+		if len == 1 {
+			let output =
+				ark_vrf::Output::<S>::deserialize_with_mode(&mut reader, compress, validate)?;
+			Ok(Self::Single(output))
+		} else {
+			let mut outputs = Vec::with_capacity(len as usize);
+			for _ in 0..len {
+				outputs.push(ark_vrf::Output::<S>::deserialize_with_mode(
+					&mut reader,
+					compress,
+					ark_serialize::Validate::No,
+				)?);
+			}
+			if let ark_serialize::Validate::Yes = validate {
+				ark_vrf::Output::<S>::batch_check(outputs.iter())?;
+			}
+			Ok(Self::Multi(outputs))
+		}
+	}
+}
+
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct RingVrfSignature<S: RingSuiteExt> {
 	proof: ark_vrf::ring::Proof<S>,
-	outputs: Vec<ark_vrf::Output<S>>,
+	outputs: RingVrfOutputs<S>,
 }
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
@@ -433,7 +539,7 @@ impl<S: RingSuiteExt> Verifiable for RingVrfVerifiable<S> {
 	type Members = MembersCommitment<S>;
 	type Intermediate = MembersSet<S>;
 	type Member = S::PublicKeyBytes;
-	type Proof = Vec<u8>;
+	type Proof = BoundedVec<u8, MaxRingVrfSignatureLen<S>>;
 	type Signature = S::SignatureBytes;
 	type StaticChunk = StaticChunk<S>;
 	type Capacity = RingSize<S>;
@@ -497,15 +603,17 @@ impl<S: RingSuiteExt> Verifiable for RingVrfVerifiable<S> {
 			capacity.size(),
 		);
 
-		let signature = RingVrfSignature::<S>::deserialize_compressed(&**proof).map_err(|_| ())?;
+		let signature =
+			RingVrfSignature::<S>::deserialize_compressed(proof.as_slice()).map_err(|_| ())?;
 
-		if contexts.len() != signature.outputs.len() {
+		let outputs = signature.outputs.as_slice();
+		if contexts.len() != outputs.len() {
 			return Err(());
 		}
 
 		let (ios, aliases): (Vec<_>, Vec<_>) = contexts
 			.iter()
-			.zip(signature.outputs)
+			.zip(outputs.iter().copied())
 			.map(|(ctx, output)| {
 				let input_msg = [S::VRF_INPUT_DOMAIN, ctx].concat();
 				let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
@@ -543,13 +651,13 @@ impl<S: RingSuiteExt> Verifiable for RingVrfVerifiable<S> {
 		{
 			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-			let signature = RingVrfSignature::<S>::deserialize_compressed_unchecked(&**proof)
-				.map_err(|_| ())?;
+			let signature =
+				RingVrfSignature::<S>::deserialize_compressed(proof.as_slice()).map_err(|_| ())?;
 
-			if signature.outputs.len() != 1 {
-				return Err(());
-			}
-			let output = signature.outputs[0];
+			let output = match signature.outputs {
+				RingVrfOutputs::Single(o) => o,
+				_ => return Err(()),
+			};
 
 			aliases.push(make_alias(&output));
 
@@ -622,11 +730,17 @@ impl<S: RingSuiteExt> Verifiable for RingVrfVerifiable<S> {
 
 		let proof = secret.prove(ios, message, &ring_prover);
 
+		let outputs = if outputs.len() == 1 {
+			RingVrfOutputs::Single(outputs.into_iter().next().unwrap())
+		} else {
+			RingVrfOutputs::Multi(outputs)
+		};
 		let signature = RingVrfSignature::<S> { outputs, proof };
 
 		let mut buf = vec![];
 		signature.serialize_compressed(&mut buf).map_err(|_| ())?;
 
+		let buf = BoundedVec::try_from(buf).map_err(|_| ())?;
 		Ok((buf, aliases))
 	}
 

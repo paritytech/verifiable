@@ -9,6 +9,7 @@ use super::*;
 use bounded_collections::{BoundedVec, ConstU32};
 
 const MAX_MEMBERS: u32 = 1024;
+const MAX_CONTEXTS: u32 = 16;
 
 /// [`Capacity`] impl for the simple demo (no ring VRF).
 impl Capacity for () {
@@ -36,7 +37,7 @@ fn simple_alias(secret: &[u8; 32], context: &[u8]) -> Alias {
 }
 
 /// Proof for [`Simple`]: a tuple of (member, aliases) where aliases are one per context.
-pub type SimpleProof = ([u8; 32], Vec<Alias>);
+pub type SimpleProof = ([u8; 32], BoundedVec<Alias, ConstU32<MAX_CONTEXTS>>);
 
 /// Toy [`Verifiable`] implementation.
 ///
@@ -113,7 +114,8 @@ impl Verifiable for Simple {
 			.iter()
 			.map(|ctx| simple_alias(secret, ctx))
 			.collect();
-		Ok(((member, aliases.clone()), aliases))
+		let bounded_aliases = BoundedVec::try_from(aliases.clone()).map_err(|_| ())?;
+		Ok(((member, bounded_aliases), aliases))
 	}
 
 	fn validate_multi_context(
@@ -130,20 +132,7 @@ impl Verifiable for Simple {
 		if aliases.len() != contexts.len() {
 			return Err(());
 		}
-		Ok(aliases.clone())
-	}
-
-	fn batch_validate(
-		capacity: Self::Capacity,
-		members: &Self::Members,
-		proofs: &[BatchProofItem<Self::Proof>],
-	) -> Result<Vec<Alias>, ()> {
-		proofs
-			.iter()
-			.map(|item| {
-				Self::validate(capacity, &item.proof, members, &item.context, &item.message)
-			})
-			.collect()
+		Ok(aliases.to_vec())
 	}
 
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
