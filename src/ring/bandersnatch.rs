@@ -58,7 +58,10 @@ mod tests {
 	use ark_vrf::ring::SrsLookup;
 
 	use super::*;
-	use crate::{ring::{ring_signature_size, RingSize}, Capacity, Verifiable};
+	use crate::{
+		ring::{ring_signature_size, RingSize},
+		Capacity, Verifiable,
+	};
 
 	// Type aliases for Bandersnatch-specific generic types
 	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;

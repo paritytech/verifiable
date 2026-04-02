@@ -135,7 +135,6 @@ impl Verifiable for Simple {
 		Ok(aliases.to_vec())
 	}
 
-
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
 		Ok(simple_alias(secret, context))
 	}

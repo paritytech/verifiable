@@ -263,7 +263,6 @@ pub trait RingSuiteExt: RingSuite + Debug + 'static {
 	/// Cache strategy for ring proof params.
 	#[cfg(feature = "prover")]
 	type ParamsCache: RingProofParamsCache<Self>;
-
 }
 
 /// Serialized ring VRF signature size for a given number of contexts.
@@ -474,7 +473,10 @@ impl<S: RingSuiteExt> CanonicalSerialize for RingVrfOutputs<S> {
 
 	fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
 		let slice = self.as_slice();
-		let item_size = slice.iter().next().map_or(0, |o| o.serialized_size(compress));
+		let item_size = slice
+			.iter()
+			.next()
+			.map_or(0, |o| o.serialized_size(compress));
 		1 + slice.len() * item_size
 	}
 }
