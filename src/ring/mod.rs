@@ -370,8 +370,8 @@ macro_rules! impl_common_traits {
 /// Intermediate state while building a ring member set.
 ///
 /// Wraps a [`ark_vrf::ring::VerifierKeyBuilder`] and accumulates members via
-/// [`Verifiable::push_members`]. Finalized into a [`MembersCommitment`]
-/// via [`Verifiable::finish_members`].
+/// [`GenerateVerifiable::push_members`]. Finalized into a [`MembersCommitment`]
+/// via [`GenerateVerifiable::finish_members`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersSet<S: RingSuiteExt>(pub(crate) ark_vrf::ring::VerifierKeyBuilder<S>);
 
@@ -386,7 +386,7 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersSet<S> {
 /// Finalized commitment to a set of ring members.
 ///
 /// This is the compact representation used for proof verification. Produced by
-/// [`Verifiable::finish_members`] from a [`MembersSet`].
+/// [`GenerateVerifiable::finish_members`] from a [`MembersSet`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
 
@@ -402,14 +402,14 @@ pub(crate) type PublicKey<S> = ark_vrf::Public<S>;
 
 /// A chunk of the ring builder's static data (a G1 affine point).
 ///
-/// Used by the `lookup` function in [`Verifiable::push_members`] to supply
+/// Used by the `lookup` function in [`GenerateVerifiable::push_members`] to supply
 /// precomputed SRS points needed to update the ring commitment.
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone, Debug)]
 pub struct StaticChunk<S: RingSuiteExt>(pub ark_vrf::ring::G1Affine<S>);
 
 impl_common_traits!(StaticChunk<S: RingSuiteExt>, S::STATIC_CHUNK_SIZE);
 
-/// State produced by [`Verifiable::open`] and consumed by [`Verifiable::create`].
+/// State produced by [`GenerateVerifiable::open`] and consumed by [`GenerateVerifiable::create`].
 ///
 /// Contains the prover's position in the ring and the keying material needed to
 /// generate a ring VRF proof. This is serializable so it can be transferred to
@@ -533,7 +533,7 @@ fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 /// The curve params provider is obtained from `S::CurveParams`.
 pub struct RingVrfVerifiable<S: RingSuiteExt>(PhantomData<S>);
 
-impl<S: RingSuiteExt> Verifiable for RingVrfVerifiable<S> {
+impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Secret = ark_vrf::Secret<S>;
 	type Commitment = ProverState<S>;
 	type Members = MembersCommitment<S>;

@@ -37,7 +37,7 @@ pub type Entropy = [u8; 32];
 ///
 /// Groups together a proof with the context and message it was created for,
 /// so that multiple proofs can be validated in a single batch operation via
-/// [`Verifiable::batch_validate`].
+/// [`GenerateVerifiable::batch_validate`].
 #[derive(Clone)]
 pub struct BatchProofItem<Proof> {
 	/// The ring VRF proof to validate.
@@ -62,7 +62,7 @@ pub struct BatchProofItem<Proof> {
 ///
 /// A convenience [`Receipt`] type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
-pub trait Verifiable {
+pub trait GenerateVerifiable {
 	/// Consolidated value identifying a particular set of members. Corresponds to the Ring Root.
 	///
 	/// This is envisioned to be stored on-chain and passed between chains.
@@ -290,16 +290,16 @@ pub trait Verifiable {
 /// Provides a simpler API for the common create-then-verify workflow via
 /// [`Receipt::create`] and [`Receipt::verify`].
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo, DecodeWithMemTracking)]
-pub struct Receipt<Gen: Verifiable> {
+pub struct Receipt<Gen: GenerateVerifiable> {
 	proof: Gen::Proof,
 	alias: Alias,
 	message: Vec<u8>,
 }
 
-impl<Gen: Verifiable> Receipt<Gen> {
+impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	/// Create a receipt by opening a commitment and producing a proof in one step.
 	///
-	/// Combines [`Verifiable::open`] and [`Verifiable::create`].
+	/// Combines [`GenerateVerifiable::open`] and [`GenerateVerifiable::create`].
 	#[cfg(feature = "prover")]
 	pub fn create<'a>(
 		capacity: Gen::Capacity,
