@@ -1,6 +1,6 @@
 use rand::RngCore;
 use verifiable::ring::bandersnatch::BandersnatchVrfVerifiable;
-use verifiable::Verifiable;
+use verifiable::GenerateVerifiable;
 
 const PROOF_PREFIX: &[u8] = b"pop register using";
 const VOUCHER_NAMES: [&str; 2] = ["TEST_VOUCHER_KEY_1", "TEST_VOUCHER_KEY_2"];
