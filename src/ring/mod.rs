@@ -520,7 +520,7 @@ struct RingVrfSignature<S: RingSuiteExt> {
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct PlainSignature<S: RingSuiteExt> {
-	proof: ark_vrf::ietf::Proof<S>,
+	proof: ark_vrf::thin::Proof<S>,
 }
 
 #[inline(always)]
@@ -757,7 +757,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
-		use ark_vrf::ietf::Prover;
+		use ark_vrf::thin::Prover;
 		let proof = secret.prove([], message);
 		let signature = PlainSignature::<S> { proof };
 		let mut raw = S::SignatureBytes::ZERO;
@@ -772,7 +772,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		message: &[u8],
 		member: &Self::Member,
 	) -> bool {
-		use ark_vrf::ietf::Verifier;
+		use ark_vrf::thin::Verifier;
 		let Ok(signature) = PlainSignature::<S>::deserialize_compressed(signature.as_ref()) else {
 			return false;
 		};

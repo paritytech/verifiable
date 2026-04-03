@@ -37,7 +37,7 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	const MEMBERS_SET_SIZE: usize = 848;
 	const MEMBERS_COMMITMENT_SIZE: usize = 768;
 	const STATIC_CHUNK_SIZE: usize = 96;
-	const SIGNATURE_SIZE: usize = 48;
+	const SIGNATURE_SIZE: usize = 64;
 	const RING_PROOF_SIZE: usize = 752;
 	const VRF_OUTPUT_SIZE: usize = 32;
 	const MAX_VRF_CONTEXTS: u8 = 16;
