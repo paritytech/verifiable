@@ -25,7 +25,7 @@ fn print_byte_array(name: &str, data: &[u8]) {
 	println!();
 }
 
-fn validate_keys(member: &[u8; 32], message: &[u8], signature: &[u8; 48]) {
+fn validate_keys(member: &[u8; 32], message: &[u8], signature: &[u8; 64]) {
 	let is_valid = BandersnatchVrfVerifiable::verify_signature(signature, message, member);
 
 	if is_valid {
