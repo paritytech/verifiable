@@ -16,13 +16,11 @@ use super::*;
 
 pub mod bandersnatch;
 
-/// Encoding mode for types that are constructed internally from trusted sources
-/// (e.g. on-chain state, locally built commitments) and do not need compression
-/// or validation during SCALE codec round-trips.
-///
-/// Equivalent to `ark_scale::HOST_CALL`: `(Compress::No, Validate::No)`.
-const TRUSTED_SOURCE: ark_scale::Usage =
-	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::No);
+/// Uncompressed encoding mode for SCALE codec round-trips.
+/// Validation is enabled to reject malformed data that could trigger panics
+/// in downstream cryptographic operations.
+const UNCOMPRESSED: ark_scale::Usage =
+	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::Yes);
 
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
@@ -287,8 +285,8 @@ macro_rules! impl_common_traits {
 			fn decode<I: ark_scale::scale::Input>(
 				input: &mut I,
 			) -> Result<Self, ark_scale::scale::Error> {
-				let a: ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> =
-					<ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> as ark_scale::scale::Decode>::decode(
+				let a: ark_scale::ArkScale<Self, { UNCOMPRESSED }> =
+					<ark_scale::ArkScale<Self, { UNCOMPRESSED }> as ark_scale::scale::Decode>::decode(
 						input,
 					)?;
 				Ok(a.0)
@@ -297,37 +295,37 @@ macro_rules! impl_common_traits {
 			fn skip<I: ark_scale::scale::Input>(
 				input: &mut I,
 			) -> Result<(), ark_scale::scale::Error> {
-				<ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> as ark_scale::scale::Decode>::skip(input)
+				<ark_scale::ArkScale<Self, { UNCOMPRESSED }> as ark_scale::scale::Decode>::skip(input)
 			}
 
 			fn encoded_fixed_size() -> Option<usize> {
-				<ark_scale::ArkScale<Self, { TRUSTED_SOURCE }> as ark_scale::scale::Decode>::encoded_fixed_size()
+				<ark_scale::ArkScale<Self, { UNCOMPRESSED }> as ark_scale::scale::Decode>::encoded_fixed_size()
 			}
 		}
 
 		impl<S: $bound> Encode for $type_name<S> {
 			fn size_hint(&self) -> usize {
-				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				let a: ark_scale::ArkScaleRef<Self, { UNCOMPRESSED }> = ark_scale::ArkScaleRef(self);
 				a.size_hint()
 			}
 
 			fn encode_to<O: ark_scale::scale::Output + ?Sized>(&self, dest: &mut O) {
-				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				let a: ark_scale::ArkScaleRef<Self, { UNCOMPRESSED }> = ark_scale::ArkScaleRef(self);
 				a.encode_to(dest)
 			}
 
 			fn encode(&self) -> alloc::vec::Vec<u8> {
-				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				let a: ark_scale::ArkScaleRef<Self, { UNCOMPRESSED }> = ark_scale::ArkScaleRef(self);
 				a.encode()
 			}
 
 			fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
-				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				let a: ark_scale::ArkScaleRef<Self, { UNCOMPRESSED }> = ark_scale::ArkScaleRef(self);
 				a.using_encoded(f)
 			}
 
 			fn encoded_size(&self) -> usize {
-				let a: ark_scale::ArkScaleRef<Self, { TRUSTED_SOURCE }> = ark_scale::ArkScaleRef(self);
+				let a: ark_scale::ArkScaleRef<Self, { UNCOMPRESSED }> = ark_scale::ArkScaleRef(self);
 				a.encoded_size()
 			}
 		}

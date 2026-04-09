@@ -1,0 +1,29 @@
+mod crash_data;
+
+use parity_scale_codec::Decode;
+use verifiable::{
+	ring::{
+		bandersnatch::{BandersnatchSha512Ell2, BandersnatchVrfVerifiable},
+		MembersCommitment, RingDomainSize, RingSize,
+	},
+	GenerateVerifiable,
+};
+
+fn main() {
+	let capacity: RingSize<BandersnatchSha512Ell2> = RingDomainSize::Domain11.into();
+	let proof: <BandersnatchVrfVerifiable as GenerateVerifiable>::Proof =
+		crash_data::PROOF_BYTES.to_vec().try_into().unwrap();
+
+	let all_zero = vec![0u8; crash_data::MEMBERS_BYTES.len()];
+	let bogus = MembersCommitment::<BandersnatchSha512Ell2>::decode(&mut &all_zero[..]).unwrap();
+
+	println!("about to trigger verifier panic");
+
+	let _ = BandersnatchVrfVerifiable::validate(
+		capacity,
+		&proof,
+		&bogus,
+		crash_data::CONTEXT,
+		crash_data::MESSAGE,
+	);
+}

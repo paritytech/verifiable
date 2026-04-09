@@ -211,7 +211,7 @@ mod builder_tests {
 	use ark_scale::MaxEncodedLen;
 	use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 	use ark_vrf::{ring::SrsLookup, suites::bandersnatch::BandersnatchSha512Ell2};
-	use parity_scale_codec::Encode;
+	use parity_scale_codec::{Decode, Encode};
 
 	use tests::{
 		bandersnatch_ring_prover_params, start_members_from_params, MembersCommitment, MembersSet,
@@ -970,6 +970,14 @@ mod builder_tests {
 			assert_eq!(&alias, mutli_ctx_alias);
 		}
 	});
+
+	// Regression: decoding a bogus (all-zero) members commitment must fail rather than
+	// producing an invalid object that panics during verification.
+	#[test]
+	fn decode_bogus_commitment_fails() {
+		let zero_bytes = vec![0u8; BandersnatchSha512Ell2::MEMBERS_COMMITMENT_SIZE];
+		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
+	}
 
 	fn build_members(
 		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as GenerateVerifiable>::Member>,
