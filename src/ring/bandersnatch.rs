@@ -1,42 +1,39 @@
 #[cfg(not(feature = "prover"))]
-use crate::ring::make_ring_verifier_params;
+use crate::ring::make_ring_context;
 use crate::ring::{
-	Bls12_381Params, RingDomainSize, RingSuiteExt, RingVrfVerifiable, VerifierParamsCache,
+	Bls12_381Params, RingDomainSize, RingSuiteExt, RingVrfVerifiable, VerifierCache,
 };
-pub use ark_vrf::suites::bandersnatch::{BandersnatchSha512Ell2, RingProofParams};
+pub use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
 
 #[cfg(feature = "prover")]
-use crate::ring::{make_ring_prover_params, ProverParamsCache};
+use crate::ring::{make_ring_setup, ProverCache};
 
 /// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
 pub type BandersnatchVrfVerifiable = RingVrfVerifiable<BandersnatchSha512Ell2>;
 
-/// Lazy-static cache for Bandersnatch ring verifier params.
+/// Lazy-static cache for Bandersnatch ring context.
 ///
-/// Params are computed once per domain size on first access and reused thereafter.
-/// When the `prover` feature is enabled, verifier params are extracted from the
-/// prover's cached `RingProofParams`.
-pub struct BandersnatchVerifierParamsCache;
+/// Computed once per domain size on first access and reused thereafter.
+/// When the `prover` feature is enabled, the context is extracted from the
+/// cached `RingSetup`.
+pub struct BandersnatchVerifierCache;
 
-impl VerifierParamsCache<BandersnatchSha512Ell2> for BandersnatchVerifierParamsCache {
-	type Handle = &'static ark_vrf::ring::RingVerifierParams<BandersnatchSha512Ell2>;
+impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
+	type Handle = &'static ark_vrf::ring::RingContext<BandersnatchSha512Ell2>;
 
+	#[cfg(feature = "prover")]
+	fn get(domain_size: RingDomainSize) -> Self::Handle {
+		BandersnatchProverCache::get(domain_size).ring_context()
+	}
+
+	#[cfg(not(feature = "prover"))]
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
-		type P = ark_vrf::ring::RingVerifierParams<BandersnatchSha512Ell2>;
+		type P = ark_vrf::ring::RingContext<BandersnatchSha512Ell2>;
 		static D11: Once<P> = Once::new();
 		static D12: Once<P> = Once::new();
 		static D16: Once<P> = Once::new();
-		let init = || {
-			#[cfg(feature = "prover")]
-			{
-				BandersnatchProverParamsCache::get(domain_size).verifier_params()
-			}
-			#[cfg(not(feature = "prover"))]
-			{
-				make_ring_verifier_params(domain_size)
-			}
-		};
+		let init = || make_ring_context(domain_size);
 		match domain_size {
 			RingDomainSize::Domain11 => D11.call_once(init),
 			RingDomainSize::Domain12 => D12.call_once(init),
@@ -45,22 +42,23 @@ impl VerifierParamsCache<BandersnatchSha512Ell2> for BandersnatchVerifierParamsC
 	}
 }
 
-/// Lazy-static cache for Bandersnatch ring proof params.
+/// Lazy-static cache for Bandersnatch ring setup.
 ///
-/// Params are computed once per domain size on first access and reused thereafter.
+/// Computed once per domain size on first access and reused thereafter.
 #[cfg(feature = "prover")]
-pub struct BandersnatchProverParamsCache;
+pub struct BandersnatchProverCache;
 
 #[cfg(feature = "prover")]
-impl ProverParamsCache<BandersnatchSha512Ell2> for BandersnatchProverParamsCache {
-	type Handle = &'static ark_vrf::ring::RingProofParams<BandersnatchSha512Ell2>;
+impl ProverCache<BandersnatchSha512Ell2> for BandersnatchProverCache {
+	type Handle = &'static ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>;
 
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
-		static D11: Once<RingProofParams> = Once::new();
-		static D12: Once<RingProofParams> = Once::new();
-		static D16: Once<RingProofParams> = Once::new();
-		let init = || make_ring_prover_params(domain_size);
+		type P = ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>;
+		static D11: Once<P> = Once::new();
+		static D12: Once<P> = Once::new();
+		static D16: Once<P> = Once::new();
+		let init = || make_ring_setup(domain_size);
 		match domain_size {
 			RingDomainSize::Domain11 => D11.call_once(init),
 			RingDomainSize::Domain12 => D12.call_once(init),
@@ -86,10 +84,10 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 	type PublicKeyBytes = [u8; Self::PUBLIC_KEY_SIZE];
 	type SignatureBytes = [u8; Self::SIGNATURE_SIZE];
 
-	type VerifierParamsCache = BandersnatchVerifierParamsCache;
+	type VerifierCache = BandersnatchVerifierCache;
 
 	#[cfg(feature = "prover")]
-	type ProverParamsCache = BandersnatchProverParamsCache;
+	type ProverCache = BandersnatchProverCache;
 }
 
 #[cfg(test)]
@@ -111,17 +109,17 @@ mod tests {
 
 	type RingBuilderPcsParams = ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>;
 
-	pub fn bandersnatch_ring_prover_params(
+	pub fn bandersnatch_ring_setup(
 		domain_size: RingDomainSize,
-	) -> &'static ark_vrf::suites::bandersnatch::RingProofParams {
-		<BandersnatchSha512Ell2 as RingSuiteExt>::ProverParamsCache::get(domain_size)
+	) -> &'static ark_vrf::ring::RingSetup<BandersnatchSha512Ell2> {
+		<BandersnatchSha512Ell2 as RingSuiteExt>::ProverCache::get(domain_size)
 	}
 
 	pub fn start_members_from_params(
 		domain_size: RingDomainSize,
 	) -> (MembersSet, RingBuilderPcsParams) {
 		let (builder, builder_pcs_params) =
-			bandersnatch_ring_prover_params(domain_size).verifier_key_builder();
+			bandersnatch_ring_setup(domain_size).verifier_key_builder();
 		(crate::ring::MembersSet(builder), builder_pcs_params)
 	}
 
@@ -255,7 +253,7 @@ mod builder_tests {
 	use parity_scale_codec::Encode;
 
 	use tests::{
-		bandersnatch_ring_prover_params, start_members_from_params, MembersCommitment, MembersSet,
+		bandersnatch_ring_setup, start_members_from_params, MembersCommitment, MembersSet,
 	};
 
 	pub type RingSize = crate::ring::RingSize<BandersnatchSha512Ell2>;
@@ -317,7 +315,7 @@ mod builder_tests {
 		println!("Full size: {}", buf.len());
 
 		// Use Domain16 for SRS generation (largest domain)
-		let full_params = bandersnatch_ring_prover_params(RingDomainSize::Domain16);
+		let full_params = bandersnatch_ring_setup(RingDomainSize::Domain16);
 
 		let mut buf = vec![];
 		full_params.serialize_compressed(&mut buf).unwrap();
@@ -541,7 +539,7 @@ mod builder_tests {
 		let message = b"FooBar";
 
 		let start = Instant::now();
-		let _ = bandersnatch_ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_setup(domain_size);
 		println!(
 			"* PCS params decode: {} ms",
 			(Instant::now() - start).as_millis()
@@ -631,7 +629,7 @@ mod builder_tests {
 		let num_members = 10;
 		let num_proofs = 5;
 
-		let _ = bandersnatch_ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_setup(domain_size);
 
 		// Generate members
 		let secrets: Vec<_> = (0..num_members)
@@ -733,7 +731,7 @@ mod builder_tests {
 		let context = b"Context";
 		let num_members = 5;
 
-		let _ = bandersnatch_ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_setup(domain_size);
 
 		// Generate members
 		let secrets: Vec<_> = (0..num_members)
@@ -869,7 +867,7 @@ mod builder_tests {
 
 		let capacity: RingSize = domain_size.into();
 		let start = Instant::now();
-		let _ = bandersnatch_ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_setup(domain_size);
 		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
 
 		// Use the domain's max ring size to test at capacity
@@ -932,7 +930,7 @@ mod builder_tests {
 	test_for_all_domains!(empty_context_works, |domain_size| {
 		let capacity: RingSize = domain_size.into();
 
-		let _ = bandersnatch_ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_setup(domain_size);
 
 		let secrets: Vec<_> = (0..3)
 			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
@@ -966,7 +964,7 @@ mod builder_tests {
 	test_for_all_domains!(multi_context_works, |domain_size| {
 		let capacity: RingSize = domain_size.into();
 
-		let _ = bandersnatch_ring_prover_params(domain_size);
+		let _ = bandersnatch_ring_setup(domain_size);
 
 		let secrets: Vec<_> = (0..10)
 			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))

@@ -15,7 +15,7 @@ parity-scale-codec = { version = "3.7.4", default-features = false, features = [
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.13", default-features = false }
-ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "dac15b2713b9010c571c88899a48b91213d0387b", default-features = false, features = ["bandersnatch", "ring"] }
+ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "68046829587db900c73d6552c3a389aaa02bae2a", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"] }
 
 [dev-dependencies]

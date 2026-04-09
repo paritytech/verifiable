@@ -158,16 +158,16 @@ pub const fn max_ring_size_from_domain_size<S: RingSuiteExt>(domain_size: RingDo
 	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(pcs_domain_size as usize)
 }
 
-/// Construct ring prover params from the suite's SRS data.
+/// Construct ring setup from the suite's SRS data.
 #[cfg(feature = "prover")]
-pub fn make_ring_prover_params<S: RingSuiteExt>(
+pub fn make_ring_setup<S: RingSuiteExt>(
 	domain_size: RingDomainSize,
-) -> ark_vrf::ring::RingProofParams<S> {
+) -> ark_vrf::ring::RingSetup<S> {
 	let data = S::CurveParams::srs_raw();
 	let pcs_params =
 		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap();
 	let ring_size = RingSize::<S>::from(domain_size).size();
-	ark_vrf::ring::RingProofParams::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
+	ark_vrf::ring::RingSetup::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
 }
 
 /// Get ring builder params for the given domain size.
@@ -180,34 +180,34 @@ pub fn ring_verifier_builder_params<S: RingSuiteExt>(
 	ark_vrf::ring::RingBuilderPcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap()
 }
 
-/// Construct verifier params for the given domain size.
-pub fn make_ring_verifier_params<S: RingSuiteExt>(
+/// Construct ring context for the given domain size.
+pub fn make_ring_context<S: RingSuiteExt>(
 	domain_size: RingDomainSize,
-) -> ark_vrf::ring::RingVerifierParams<S> {
+) -> ark_vrf::ring::RingContext<S> {
 	let ring_size = RingSize::<S>::from(domain_size).size();
-	ark_vrf::ring::RingVerifierParams::<S>::from_ring_size(ring_size)
+	ark_vrf::ring::RingContext::<S>::new(ring_size)
 }
 
-/// Trait for caching ring verifier params.
+/// Trait for caching ring context.
 ///
 /// The `Handle` associated type allows different caching strategies.
-pub trait VerifierParamsCache<S: RingSuiteExt> {
-	/// Handle type returned by the cache. Must deref to `RingVerifierParams<S>`.
-	type Handle: Deref<Target = ark_vrf::ring::RingVerifierParams<S>>;
+pub trait VerifierCache<S: RingSuiteExt> {
+	/// Handle type returned by the cache. Must deref to `RingContext<S>`.
+	type Handle: Deref<Target = ark_vrf::ring::RingContext<S>>;
 
-	/// Get or construct ring verifier params for the given domain size.
+	/// Get or construct ring context for the given domain size.
 	fn get(domain_size: RingDomainSize) -> Self::Handle;
 }
 
-/// Trait for caching ring proof params.
+/// Trait for caching ring setup.
 ///
 /// The `Handle` associated type allows different caching strategies.
 #[cfg(feature = "prover")]
-pub trait ProverParamsCache<S: RingSuiteExt> {
-	/// Handle type returned by the cache. Must deref to `RingProofParams<S>`.
-	type Handle: Deref<Target = ark_vrf::ring::RingProofParams<S>>;
+pub trait ProverCache<S: RingSuiteExt> {
+	/// Handle type returned by the cache. Must deref to `RingSetup<S>`.
+	type Handle: Deref<Target = ark_vrf::ring::RingSetup<S>>;
 
-	/// Get or construct ring proof params for the given domain size.
+	/// Get or construct ring setup for the given domain size.
 	fn get(domain_size: RingDomainSize) -> Self::Handle;
 }
 
@@ -215,19 +215,19 @@ pub trait ProverParamsCache<S: RingSuiteExt> {
 pub type NullCache = ();
 
 #[cfg(feature = "prover")]
-impl<S: RingSuiteExt> ProverParamsCache<S> for NullCache {
-	type Handle = alloc::boxed::Box<ark_vrf::ring::RingProofParams<S>>;
+impl<S: RingSuiteExt> ProverCache<S> for NullCache {
+	type Handle = alloc::boxed::Box<ark_vrf::ring::RingSetup<S>>;
 
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		alloc::boxed::Box::new(make_ring_prover_params::<S>(domain_size))
+		alloc::boxed::Box::new(make_ring_setup::<S>(domain_size))
 	}
 }
 
-impl<S: RingSuiteExt> VerifierParamsCache<S> for NullCache {
-	type Handle = alloc::boxed::Box<ark_vrf::ring::RingVerifierParams<S>>;
+impl<S: RingSuiteExt> VerifierCache<S> for NullCache {
+	type Handle = alloc::boxed::Box<ark_vrf::ring::RingContext<S>>;
 
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		alloc::boxed::Box::new(make_ring_verifier_params::<S>(domain_size))
+		alloc::boxed::Box::new(make_ring_context::<S>(domain_size))
 	}
 }
 
@@ -287,12 +287,12 @@ pub trait RingSuiteExt: RingSuite + Debug + 'static {
 	/// The curve static data provider for this suite.
 	type CurveParams: RingCurveParams;
 
-	/// Cache strategy for ring verifier params (prover and verifier).
-	type VerifierParamsCache: VerifierParamsCache<Self>;
+	/// Cache strategy for ring context (verifier).
+	type VerifierCache: VerifierCache<Self>;
 
-	/// Cache strategy for ring proof params (prover only).
+	/// Cache strategy for ring setup (prover).
 	#[cfg(feature = "prover")]
-	type ProverParamsCache: ProverParamsCache<Self>;
+	type ProverCache: ProverCache<Self>;
 }
 
 /// Serialized ring VRF signature size for a given number of contexts.
@@ -626,8 +626,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<Vec<Alias>, ()> {
-		let verifier_params = S::VerifierParamsCache::get(capacity.dom_size);
-		let ring_verifier = verifier_params.verifier(members.0.clone());
+		let verifier_params = S::VerifierCache::get(capacity.dom_size);
+		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let signature =
 			RingVrfSignature::<S>::deserialize_compressed(proof.as_slice()).map_err(|_| ())?;
@@ -662,8 +662,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
 	) -> Result<Vec<Alias>, ()> {
-		let verifier_params = S::VerifierParamsCache::get(capacity.dom_size);
-		let verifier = verifier_params.verifier(members.0.clone());
+		let verifier_params = S::VerifierCache::get(capacity.dom_size);
+		let verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let mut aliases = Vec::with_capacity(proofs.len());
 		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(verifier);
@@ -709,8 +709,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.collect::<Result<Vec<_>, _>>()?;
 		let member = PublicKey::<S>::deserialize_compressed(member.as_ref()).map_err(|_| ())?;
 		let prover_idx = pks.iter().position(|&m| m == member.0).ok_or(())? as u32;
-		let prover_key = S::ProverParamsCache::get(capacity.dom_size)
-			.prover_key(&pks[..])
+		let prover_key = S::ProverCache::get(capacity.dom_size)
+			.prover_key(&pks)
 			.map_err(|_| ())?;
 		Ok(ProverState {
 			domain_size: capacity.dom_size.value(),
@@ -728,12 +728,13 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<(Self::Proof, Vec<Alias>), ()> {
 		use ark_vrf::ring::Prover;
 		let domain_size = RingDomainSize::try_from(commitment.domain_size).map_err(|_| ())?;
-		let params = S::ProverParamsCache::get(domain_size);
-		if commitment.prover_idx >= params.max_ring_size() as u32 {
+		let prover_params = S::ProverCache::get(domain_size);
+		if commitment.prover_idx >= prover_params.max_ring_size() as u32 {
 			return Err(());
 		}
 
-		let ring_prover = params.prover(commitment.prover_key, commitment.prover_idx as usize);
+		let ring_prover =
+			prover_params.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
 
 		let (ios, aliases, outputs): (Vec<_>, Vec<_>, Vec<_>) = contexts
 			.iter()
