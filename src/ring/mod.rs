@@ -371,15 +371,18 @@ macro_rules! impl_common_traits {
 		impl<S: $bound + 'static> scale_info::TypeInfo for $type_name<S> {
 			type Identity = Self;
 			fn type_info() -> scale_info::Type {
-				scale_info::Type::builder()
-					.path(scale_info::Path::new(
+				scale_info::Type::new(
+					scale_info::Path::new(
 						stringify!($type_name),
 						module_path!(),
-					))
-					.composite(scale_info::build::Fields::unnamed().field(|f| {
-						f.ty::<alloc::vec::Vec<u8>>()
-							.type_name(stringify!($type_name))
-					}))
+					),
+					vec![],
+					scale_info::TypeDefArray::new(
+						$size_expr as u32,
+						scale_info::MetaType::new::<u8>(),
+					),
+					vec![],
+				)
 			}
 		}
 
