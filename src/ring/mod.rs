@@ -318,18 +318,18 @@ macro_rules! impl_common_traits {
 			}
 		}
 
+		impl<S: $bound> ark_scale::ArkScaleMaxEncodedLen for $type_name<S> {
+			fn max_encoded_len(_compress: ark_serialize::Compress) -> usize {
+				$size_expr
+			}
+		}
+
 		impl<S: $bound + 'static> scale_info::TypeInfo for $type_name<S> {
 			type Identity = Self;
 			fn type_info() -> scale_info::Type {
-				scale_info::Type::builder()
-					.path(scale_info::Path::new(
-						stringify!($type_name),
-						module_path!(),
-					))
-					.composite(scale_info::build::Fields::unnamed().field(|f| {
-						f.ty::<alloc::vec::Vec<u8>>()
-							.type_name(stringify!($type_name))
-					}))
+				let mut info = <ark_scale::ArkScale<Self, { TRUSTED_SOURCE }>>::type_info();
+				info.path = scale_info::Path::new(stringify!($type_name), module_path!());
+				info
 			}
 		}
 
