@@ -655,6 +655,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		Ok(aliases)
 	}
 
+	// In order to support ulti ring batch verification we need to:
+	// 1. build the verifier from verifier params with bigger domain size
+	//    - We need the one build from the longer SRS
+	// 2. maintain a list of caches (one for each verifier key)
+	//    - the loop below needs to build the `verifier` using the appropriate verifier key
 	fn batch_validate(
 		capacity: Self::Capacity,
 		members: &Self::Members,
@@ -664,7 +669,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let mut aliases = Vec::with_capacity(proofs.len());
-		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(verifier);
+		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(&verifier);
 		for BatchProofItem {
 			proof,
 			context,
@@ -684,7 +689,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			aliases.push(make_alias(&output));
 
 			let io = VrfIo { input, output };
-			batch_verifier.push(io, message, &signature.proof);
+			batch_verifier
+				.push(&verifier, [io], message, &signature.proof)
+				.map_err(|_| ())?;
 		}
 		if batch_verifier.verify().is_ok() {
 			return Ok(aliases);
