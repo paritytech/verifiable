@@ -1018,6 +1018,69 @@ mod builder_tests {
 		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
 	}
 
+	// Regression for srlabs_findings#657: a proof with trailing garbage bytes must
+	// not be accepted, otherwise the same underlying signature could be re-encoded
+	// as multiple distinct byte arrays (proof malleability).
+	#[test]
+	fn validate_rejects_trailing_bytes() {
+		use crate::BatchProofItem;
+		use bounded_collections::BoundedVec;
+
+		let domain_size = RingDomainSize::Domain11;
+		let capacity: RingSize = domain_size.into();
+
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let secrets: Vec<_> = (0..3)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+			.collect();
+		let member_keys: Vec<_> = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect();
+
+		let members = build_members(member_keys.iter().copied(), domain_size);
+		let commitment =
+			BandersnatchVrfVerifiable::open(capacity, &member_keys[0], member_keys.iter().cloned())
+				.unwrap();
+
+		let context = b"ctx";
+		let message = b"msg";
+		let (proof, alias) =
+			BandersnatchVrfVerifiable::create(commitment, &secrets[0], context, message).unwrap();
+
+		// Original proof validates.
+		let alias_out =
+			BandersnatchVrfVerifiable::validate(capacity, &proof, &members, context, message)
+				.unwrap();
+		assert_eq!(alias_out, alias);
+
+		// Malleate by appending bytes; this must be rejected.
+		let mut bytes = proof.into_inner();
+		bytes.extend_from_slice(&[0u8; 16]);
+		let proof_malleated: <BandersnatchVrfVerifiable as GenerateVerifiable>::Proof =
+			BoundedVec::try_from(bytes).unwrap();
+
+		assert!(BandersnatchVrfVerifiable::validate(
+			capacity,
+			&proof_malleated,
+			&members,
+			context,
+			message,
+		)
+		.is_err());
+
+		// Same check via batch_validate.
+		let batch_items = vec![BatchProofItem {
+			proof: proof_malleated,
+			context: context.to_vec(),
+			message: message.to_vec(),
+		}];
+		assert!(
+			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &batch_items).is_err()
+		);
+	}
+
 	fn build_members(
 		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as GenerateVerifiable>::Member>,
 		domain_size: RingDomainSize,

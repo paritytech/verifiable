@@ -546,6 +546,19 @@ struct RingVrfSignature<S: RingSuiteExt> {
 	outputs: RingVrfOutputs<S>,
 }
 
+/// Deserializes a [`RingVrfSignature`] and rejects any trailing bytes left in
+/// the input buffer. This prevents proof malleability where appending arbitrary
+/// bytes to a valid proof would still verify but produce a distinct encoding.
+fn deserialize_ring_signature_canonical<S: RingSuiteExt>(
+	mut bytes: &[u8],
+) -> Result<RingVrfSignature<S>, ()> {
+	let signature = RingVrfSignature::<S>::deserialize_compressed(&mut bytes).map_err(|_| ())?;
+	if !bytes.is_empty() {
+		return Err(());
+	}
+	Ok(signature)
+}
+
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct PlainSignature<S: RingSuiteExt> {
 	proof: ark_vrf::thin::Proof<S>,
@@ -627,8 +640,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let verifier_params = S::VerifierCache::get(capacity.dom_size);
 		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
-		let signature =
-			RingVrfSignature::<S>::deserialize_compressed(proof.as_slice()).map_err(|_| ())?;
+		let signature = deserialize_ring_signature_canonical::<S>(proof.as_slice())?;
 
 		let outputs = signature.outputs.as_slice();
 		if contexts.len() != outputs.len() {
@@ -678,8 +690,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		{
 			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-			let signature =
-				RingVrfSignature::<S>::deserialize_compressed(proof.as_slice()).map_err(|_| ())?;
+			let signature = deserialize_ring_signature_canonical::<S>(proof.as_slice())?;
 
 			let output = match signature.outputs {
 				RingVrfOutputs::Single(o) => o,
