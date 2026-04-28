@@ -1018,9 +1018,8 @@ mod builder_tests {
 		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
 	}
 
-	// Regression for srlabs_findings#657: a proof with trailing garbage bytes must
-	// not be accepted, otherwise the same underlying signature could be re-encoded
-	// as multiple distinct byte arrays (proof malleability).
+	// A proof with trailing garbage bytes must not be accepted, otherwise the same
+	// underlying signature could be re-encoded as multiple distinct byte arrays.
 	#[test]
 	fn validate_rejects_trailing_bytes() {
 		use crate::BatchProofItem;

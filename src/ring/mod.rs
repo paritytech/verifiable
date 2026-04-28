@@ -546,23 +546,29 @@ struct RingVrfSignature<S: RingSuiteExt> {
 	outputs: RingVrfOutputs<S>,
 }
 
-/// Deserializes a [`RingVrfSignature`] and rejects any trailing bytes left in
-/// the input buffer. This prevents proof malleability where appending arbitrary
-/// bytes to a valid proof would still verify but produce a distinct encoding.
-fn deserialize_ring_signature_canonical<S: RingSuiteExt>(
-	mut bytes: &[u8],
-) -> Result<RingVrfSignature<S>, ()> {
-	let signature = RingVrfSignature::<S>::deserialize_compressed(&mut bytes).map_err(|_| ())?;
-	if !bytes.is_empty() {
-		return Err(());
-	}
-	Ok(signature)
-}
-
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct PlainSignature<S: RingSuiteExt> {
 	proof: ark_vrf::thin::Proof<S>,
 }
+
+/// Extension to [`CanonicalDeserialize`] that decodes from a byte slice and
+/// rejects any trailing bytes, enforcing a canonical encoding.
+///
+/// Without this check, valid leading bytes followed by garbage would deserialize
+/// successfully, allowing callers to construct multiple distinct byte arrays
+/// that decode to the same value (signature/proof malleability).
+trait CanonicalDeserializeExt: CanonicalDeserialize {
+	fn deserialize_canonical(bytes: &[u8]) -> Result<Self, ()> {
+		let mut cursor = bytes;
+		let value = Self::deserialize_compressed(&mut cursor).map_err(|_| ())?;
+		if !cursor.is_empty() {
+			return Err(());
+		}
+		Ok(value)
+	}
+}
+
+impl<T: CanonicalDeserialize> CanonicalDeserializeExt for T {}
 
 #[inline(always)]
 fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
@@ -598,7 +604,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<(), ()> {
 		let mut keys = vec![];
 		for member in members {
-			let pk = PublicKey::<S>::deserialize_compressed(member.as_ref()).map_err(|_| ())?;
+			let pk = PublicKey::<S>::deserialize_canonical(member.as_ref())?;
 			keys.push(pk.0);
 		}
 		let loader = |range: Range<usize>| {
@@ -640,7 +646,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let verifier_params = S::VerifierCache::get(capacity.dom_size);
 		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
-		let signature = deserialize_ring_signature_canonical::<S>(proof.as_slice())?;
+		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
 
 		let outputs = signature.outputs.as_slice();
 		if contexts.len() != outputs.len() {
@@ -690,7 +696,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		{
 			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-			let signature = deserialize_ring_signature_canonical::<S>(proof.as_slice())?;
+			let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
 
 			let output = match signature.outputs {
 				RingVrfOutputs::Single(o) => o,
@@ -717,13 +723,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
 		let pks = members
-			.map(|m| {
-				PublicKey::<S>::deserialize_compressed(m.as_ref())
-					.map(|pk| pk.0)
-					.map_err(|_| ())
-			})
+			.map(|m| PublicKey::<S>::deserialize_canonical(m.as_ref()).map(|pk| pk.0))
 			.collect::<Result<Vec<_>, _>>()?;
-		let member = PublicKey::<S>::deserialize_compressed(member.as_ref()).map_err(|_| ())?;
+		let member = PublicKey::<S>::deserialize_canonical(member.as_ref())?;
 		let prover_idx = pks.iter().position(|&m| m == member.0).ok_or(())? as u32;
 		let prover_key = S::ProverCache::get(capacity.dom_size)
 			.prover_key(&pks)
@@ -794,7 +796,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn is_member_valid(member: &Self::Member) -> bool {
-		PublicKey::<S>::deserialize_compressed(member.as_ref()).is_ok()
+		PublicKey::<S>::deserialize_canonical(member.as_ref()).is_ok()
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
@@ -814,10 +816,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		member: &Self::Member,
 	) -> bool {
 		use ark_vrf::thin::Verifier;
-		let Ok(signature) = PlainSignature::<S>::deserialize_compressed(signature.as_ref()) else {
+		let Ok(signature) = PlainSignature::<S>::deserialize_canonical(signature.as_ref()) else {
 			return false;
 		};
-		let Ok(public) = PublicKey::<S>::deserialize_compressed(member.as_ref()) else {
+		let Ok(public) = PublicKey::<S>::deserialize_canonical(member.as_ref()) else {
 			return false;
 		};
 		public.verify([], message, &signature.proof).is_ok()
