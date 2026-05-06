@@ -52,12 +52,7 @@ fn alias_for(secret: &[u8; 32], context: &[u8]) -> Alias {
 
 /// Tag binding the prover (`member`), the contexts, the resulting aliases,
 /// and the message. The verifier reconstructs the same tag and compares.
-fn proof_tag(
-	member: &[u8; 32],
-	contexts: &[&[u8]],
-	aliases: &[Alias],
-	message: &[u8],
-) -> [u8; 32] {
+fn proof_tag(member: &[u8; 32], contexts: &[&[u8]], aliases: &[Alias], message: &[u8]) -> [u8; 32] {
 	let mut hasher = Sha256::new();
 	hasher.update(TAG_PROOF);
 	hasher.update(member);
@@ -75,13 +70,14 @@ fn proof_tag(
 	hasher.finalize().into()
 }
 
-/// Proof for [`Simple`]: `(member, aliases, tag)` where `tag` is a hash that
-/// binds the member, contexts, aliases, and message together.
-pub type SimpleProof = (
-	[u8; 32],
-	BoundedVec<Alias, ConstU32<MAX_CONTEXTS>>,
-	[u8; 32],
-);
+/// Proof for [`Simple`]. The `tag` is a hash that binds the member, contexts,
+/// aliases, and message together; the verifier recomputes it and compares.
+#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
+pub struct SimpleProof {
+	pub tag: [u8; 32],
+	pub member: [u8; 32],
+	pub aliases: BoundedVec<Alias, ConstU32<MAX_CONTEXTS>>,
+}
 
 /// Toy [`GenerateVerifiable`] implementation.
 #[derive(Debug)]
@@ -98,7 +94,7 @@ impl GenerateVerifiable for Simple {
 	type StaticChunk = ();
 	type Capacity = ();
 
-	fn start_members(_capacity: ()) -> Self::Intermediate {
+	fn start_members(_capacity: Self::Capacity) -> Self::Intermediate {
 		BoundedVec::new()
 	}
 
@@ -130,7 +126,7 @@ impl GenerateVerifiable for Simple {
 
 	#[cfg(feature = "prover")]
 	fn open(
-		_capacity: (),
+		_capacity: Self::Capacity,
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -157,7 +153,12 @@ impl GenerateVerifiable for Simple {
 		let aliases: Vec<Alias> = contexts.iter().map(|ctx| alias_for(secret, ctx)).collect();
 		let bounded = BoundedVec::try_from(aliases.clone()).map_err(|_| ())?;
 		let tag = proof_tag(&member, contexts, &aliases, message);
-		Ok(((member, bounded, tag), aliases))
+		let proof = SimpleProof {
+			tag,
+			member,
+			aliases: bounded,
+		};
+		Ok((proof, aliases))
 	}
 
 	fn validate_multi_context(
@@ -167,7 +168,11 @@ impl GenerateVerifiable for Simple {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<Vec<Alias>, ()> {
-		let (member, aliases, tag) = proof;
+		let SimpleProof {
+			tag,
+			member,
+			aliases,
+		} = proof;
 		if !members.contains(member) {
 			return Err(());
 		}
@@ -265,7 +270,8 @@ mod tests {
 		let members = make_members(&[secret]);
 
 		let commitment = Simple::open((), &member, members.iter().cloned()).unwrap();
-		let (proof, _) = Simple::create_multi_context(commitment, &secret, &[b"ctx"], b"msg").unwrap();
+		let (proof, _) =
+			Simple::create_multi_context(commitment, &secret, &[b"ctx"], b"msg").unwrap();
 
 		assert!(Simple::validate((), &proof, &members, b"ctx", b"msg").is_ok());
 		// Different message must fail.
@@ -280,7 +286,8 @@ mod tests {
 		let members = make_members(&[secret]);
 
 		let commitment = Simple::open((), &member, members.iter().cloned()).unwrap();
-		let (proof, _) = Simple::create_multi_context(commitment, &secret, &[b"a"], b"msg").unwrap();
+		let (proof, _) =
+			Simple::create_multi_context(commitment, &secret, &[b"a"], b"msg").unwrap();
 
 		assert!(Simple::validate((), &proof, &members, b"a", b"msg").is_ok());
 		// Wrong context must fail (alias mismatch).
