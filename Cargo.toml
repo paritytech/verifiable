@@ -17,6 +17,7 @@ ark-serialize = { version = "0.5", default-features = false, features = ["derive
 ark-scale = { version = "0.0.13", default-features = false }
 ark-vrf = { version = "0.5.0", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"] }
+sha2 = { version = "0.10", default-features = false, optional = true }
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["getrandom"] }
@@ -38,6 +39,7 @@ std = [
     "ark-scale/std",
     "ark-vrf/std",
     "ark-vrf/parallel",
+    "sha2?/std",
 ]
 # Include ring builder params binary data for building ring commitments.
 # Disable this feature to reduce library size in production environments
@@ -51,4 +53,4 @@ no-std-prover = [
     "prover",
     "ark-vrf/test-vectors",
 ]
-testing = []
+testing = ["sha2"]
