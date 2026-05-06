@@ -6,7 +6,7 @@ use crate::ring::{
 pub use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
 
 #[cfg(feature = "prover")]
-use crate::ring::{make_ring_setup, ProverCache};
+use crate::ring::{ProverCache, make_ring_setup};
 
 /// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
 pub type BandersnatchVrfVerifiable = RingVrfVerifiable<BandersnatchSha512Ell2>;
@@ -98,8 +98,8 @@ mod tests {
 
 	use super::*;
 	use crate::{
-		ring::{ring_signature_size, RingSize},
 		Capacity, GenerateVerifiable,
+		ring::{RingSize, ring_signature_size},
 	};
 
 	// Type aliases for Bandersnatch-specific generic types
@@ -244,7 +244,7 @@ mod tests {
 
 #[cfg(test)]
 mod builder_tests {
-	use crate::{ring::ring_verifier_builder_params, Capacity, GenerateVerifiable};
+	use crate::{Capacity, GenerateVerifiable, ring::ring_verifier_builder_params};
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
@@ -253,7 +253,7 @@ mod builder_tests {
 	use parity_scale_codec::{Decode, Encode};
 
 	use tests::{
-		bandersnatch_ring_setup, start_members_from_params, MembersCommitment, MembersSet,
+		MembersCommitment, MembersSet, bandersnatch_ring_setup, start_members_from_params,
 	};
 
 	pub type RingSize = crate::ring::RingSize<BandersnatchSha512Ell2>;
@@ -799,12 +799,10 @@ mod builder_tests {
 		let mut wrong_message_items = batch_items.clone();
 		wrong_message_items[2].message = b"tampered message".to_vec();
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(
-			capacity,
-			&members,
-			&wrong_message_items,
-		)
-		.is_err());
+		assert!(
+			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &wrong_message_items,)
+				.is_err()
+		);
 
 		// Test with a proof from a non-member key.
 		// Generate a new key that is NOT in the ring, create a proof using a ring
@@ -1060,14 +1058,16 @@ mod builder_tests {
 		let proof_malleated: <BandersnatchVrfVerifiable as GenerateVerifiable>::Proof =
 			BoundedVec::try_from(bytes).unwrap();
 
-		assert!(BandersnatchVrfVerifiable::validate(
-			capacity,
-			&proof_malleated,
-			&members,
-			context,
-			message,
-		)
-		.is_err());
+		assert!(
+			BandersnatchVrfVerifiable::validate(
+				capacity,
+				&proof_malleated,
+				&members,
+				context,
+				message,
+			)
+			.is_err()
+		);
 
 		// Same check via batch_validate.
 		let batch_items = vec![BatchProofItem {

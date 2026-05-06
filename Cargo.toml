@@ -1,7 +1,7 @@
 [package]
 name = "verifiable"
 version = "0.5.0"
-edition = "2021"
+edition = "2024"
 description = "Interface for cryptographic proof of membership of a set with known members"
 authors = ["Parity Technologies <admin@parity.io>"]
 repository = "https://github.com/paritytech/verifiable.git"

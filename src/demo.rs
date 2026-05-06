@@ -191,14 +191,16 @@ mod tests {
 		assert_eq!(alias, simple_alias(&alice_sec, context));
 
 		// Charlie (not a member) cannot create a proof.
-		assert!(SimpleReceipt::create(
-			(),
-			&charlie_sec,
-			members.iter().cloned(),
-			context,
-			message.to_vec(),
-		)
-		.is_err());
+		assert!(
+			SimpleReceipt::create(
+				(),
+				&charlie_sec,
+				members.iter().cloned(),
+				context,
+				message.to_vec(),
+			)
+			.is_err()
+		);
 	}
 
 	#[cfg(feature = "prover")]
