@@ -46,28 +46,28 @@ fn h(domain: &[u8], parts: &[&[u8]]) -> [u8; 32] {
 	hasher.finalize().into()
 }
 
-fn alias_for(secret: &[u8; 32], context: &[u8]) -> Alias {
-	h(TAG_ALIAS, &[secret, context])
+fn make_alias(member: &[u8; 32], context: &[u8]) -> Alias {
+	h(TAG_ALIAS, &[member, context])
 }
 
-/// Tag binding the prover (`member`), the contexts, the resulting aliases,
-/// and the message. The verifier reconstructs the same tag and compares.
-fn proof_tag(member: &[u8; 32], contexts: &[&[u8]], aliases: &[Alias], message: &[u8]) -> [u8; 32] {
-	let mut hasher = Sha256::new();
-	hasher.update(TAG_PROOF);
-	hasher.update(member);
-	hasher.update((contexts.len() as u32).to_le_bytes());
-	for c in contexts {
-		hasher.update((c.len() as u32).to_le_bytes());
-		hasher.update(c);
-	}
-	hasher.update((aliases.len() as u32).to_le_bytes());
-	for a in aliases {
-		hasher.update(a);
-	}
-	hasher.update((message.len() as u32).to_le_bytes());
-	hasher.update(message);
-	hasher.finalize().into()
+fn make_signature(member: &[u8; 32], message: &[u8]) -> [u8; 32] {
+	h(TAG_SIG, &[member, message])
+}
+
+fn make_proof_tag(
+	member: &[u8; 32],
+	contexts: &[&[u8]],
+	aliases: &[Alias],
+	message: &[u8],
+) -> [u8; 32] {
+	let n = (contexts.len() as u32).to_le_bytes();
+	let mut parts: Vec<&[u8]> = Vec::with_capacity(3 + contexts.len() + aliases.len());
+	parts.push(member);
+	parts.push(&n);
+	parts.extend(contexts.iter().copied());
+	parts.extend(aliases.iter().map(|a| a.as_slice()));
+	parts.push(message);
+	h(TAG_PROOF, &parts)
 }
 
 /// Proof for [`Simple`]. The `tag` is a hash that binds the member, contexts,
@@ -150,9 +150,9 @@ impl GenerateVerifiable for Simple {
 		if contexts.len() > MAX_CONTEXTS as usize {
 			return Err(());
 		}
-		let aliases: Vec<Alias> = contexts.iter().map(|ctx| alias_for(secret, ctx)).collect();
+		let aliases: Vec<Alias> = contexts.iter().map(|ctx| make_alias(secret, ctx)).collect();
 		let bounded = BoundedVec::try_from(aliases.clone()).map_err(|_| ())?;
-		let tag = proof_tag(&member, contexts, &aliases, message);
+		let tag = make_proof_tag(secret, contexts, &aliases, message);
 		let proof = SimpleProof {
 			tag,
 			member,
@@ -180,11 +180,11 @@ impl GenerateVerifiable for Simple {
 			return Err(());
 		}
 		for (alias, ctx) in aliases.iter().zip(contexts.iter()) {
-			if alias != &alias_for(member, ctx) {
+			if alias != &make_alias(member, ctx) {
 				return Err(());
 			}
 		}
-		let expected_tag = proof_tag(member, contexts, aliases, message);
+		let expected_tag = make_proof_tag(member, contexts, aliases, message);
 		if tag != &expected_tag {
 			return Err(());
 		}
@@ -192,7 +192,7 @@ impl GenerateVerifiable for Simple {
 	}
 
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
-		Ok(alias_for(secret, context))
+		Ok(make_alias(secret, context))
 	}
 
 	fn is_member_valid(_member: &Self::Member) -> bool {
@@ -200,7 +200,7 @@ impl GenerateVerifiable for Simple {
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
-		Ok(h(TAG_SIG, &[secret, message]))
+		Ok(make_signature(secret, message))
 	}
 
 	fn verify_signature(
@@ -210,7 +210,7 @@ impl GenerateVerifiable for Simple {
 	) -> bool {
 		// Toy: `Member == Secret`, so the verifier recomputes the MAC. This is
 		// trivially forgeable -- the point is that it binds to the message.
-		signature == &h(TAG_SIG, &[member, message])
+		signature == &make_signature(member, message)
 	}
 }
 
@@ -247,19 +247,17 @@ mod tests {
 		.unwrap();
 		let (alias, msg) = receipt.verify((), &members, context).unwrap();
 		assert_eq!(&msg, message);
-		assert_eq!(alias, alias_for(&alice_sec, context));
+		assert_eq!(alias, make_alias(&alice_sec, context));
 
 		// Charlie (not a member) cannot create a proof.
-		assert!(
-			SimpleReceipt::create(
-				(),
-				&charlie_sec,
-				members.iter().cloned(),
-				context,
-				message.to_vec(),
-			)
-			.is_err()
-		);
+		assert!(SimpleReceipt::create(
+			(),
+			&charlie_sec,
+			members.iter().cloned(),
+			context,
+			message.to_vec(),
+		)
+		.is_err());
 	}
 
 	#[cfg(feature = "prover")]
