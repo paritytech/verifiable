@@ -20,7 +20,7 @@ use bounded_collections::{BoundedVec, ConstU32};
 use sha2::{Digest, Sha256};
 
 const MAX_MEMBERS: u32 = 1024;
-const MAX_CONTEXTS: u32 = 16;
+const MAX_CONTEXTS: u32 = 3;
 
 const TAG_ALIAS: &[u8] = b"verifiable-demo:v1:alias";
 const TAG_SIG: &[u8] = b"verifiable-demo:v1:sig";
