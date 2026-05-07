@@ -26,13 +26,6 @@ const TAG_ALIAS: &[u8] = b"verifiable-mock:v1:alias";
 const TAG_SIG: &[u8] = b"verifiable-mock:v1:sig";
 const TAG_PROOF: &[u8] = b"verifiable-mock:v1:proof";
 
-/// [`Capacity`] impl for the mock (no ring VRF).
-impl Capacity for () {
-	fn size(&self) -> usize {
-		MAX_MEMBERS as usize
-	}
-}
-
 /// SHA-256 with length-prefixed inputs for unambiguous concatenation.
 fn h(domain: &[u8], parts: &[&[u8]]) -> [u8; 32] {
 	let mut hasher = Sha256::new();
