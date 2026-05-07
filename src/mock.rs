@@ -85,9 +85,9 @@ impl GenerateVerifiable for Mock {
 	type Proof = MockProof;
 	type Signature = [u8; 32];
 	type StaticChunk = ();
-	type Capacity = ();
+	type Config = ();
 
-	fn start_members(_capacity: Self::Capacity) -> Self::Intermediate {
+	fn start_members(_config: Self::Config) -> Self::Intermediate {
 		BoundedVec::new()
 	}
 
@@ -119,7 +119,7 @@ impl GenerateVerifiable for Mock {
 
 	#[cfg(feature = "prover")]
 	fn open(
-		_capacity: Self::Capacity,
+		_config: Self::Config,
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -155,7 +155,7 @@ impl GenerateVerifiable for Mock {
 	}
 
 	fn validate_multi_context(
-		_capacity: Self::Capacity,
+		_config: Self::Config,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		contexts: &[&[u8]],

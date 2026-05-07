@@ -93,17 +93,21 @@ pub trait GenerateVerifiable {
 	/// For ring VRF implementations, this is typically a G1 affine point from the SRS.
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 
-	/// The capacity type used to parametrize ring operations.
-	type Capacity: Clone + Copy;
-
 	/// A signature attributable to a specific `Member`, verifiable against that member's
 	/// public key.
 	///
 	/// Created via `sign`, verified via `verify_signature`.
 	type Signature: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo;
 
+	/// Per-call configuration for the operations below.
+	///
+	/// Used by implementations that support multiple parameter sets to select
+	/// which one applies at each call (for ring VRF: which domain/ring size).
+	/// Set to `()` when there is nothing to configure.
+	type Config: Clone + Copy;
+
 	/// Begin building a `Members` value.
-	fn start_members(capacity: Self::Capacity) -> Self::Intermediate;
+	fn start_members(config: Self::Config) -> Self::Intermediate;
 
 	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
 	/// value.
@@ -144,7 +148,7 @@ pub trait GenerateVerifiable {
 	/// implementing the functionality.
 	#[cfg(feature = "prover")]
 	fn open(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		member: &Self::Member,
 		members_iter: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()>;
@@ -193,14 +197,14 @@ pub trait GenerateVerifiable {
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
 	/// that they elected to opine `message`.
 	fn is_valid(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
 		alias: &Alias,
 		message: &[u8],
 	) -> bool {
-		match Self::validate(capacity, proof, members, context, message) {
+		match Self::validate(config, proof, members, context, message) {
 			Ok(a) => &a == alias,
 			Err(()) => false,
 		}
@@ -210,14 +214,14 @@ pub trait GenerateVerifiable {
 	/// if so, ensure that the member is necessarily associated with corresponding `alias` from the given `aliases` in this `context` and
 	/// that they elected to opine `message`.
 	fn is_valid_multi_context(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		aliases: &[Alias],
 		message: &[u8],
 	) -> bool {
-		match Self::validate_multi_context(capacity, proof, members, contexts, message) {
+		match Self::validate_multi_context(config, proof, members, contexts, message) {
 			Ok(a) => a == aliases,
 			Err(()) => false,
 		}
@@ -228,19 +232,19 @@ pub trait GenerateVerifiable {
 
 	/// Like `is_valid`, but `alias` is returned, not provided.
 	fn validate(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		context: &[u8],
 		message: &[u8],
 	) -> Result<Alias, ()> {
-		let result = Self::validate_multi_context(capacity, proof, members, &[context], message)?;
+		let result = Self::validate_multi_context(config, proof, members, &[context], message)?;
 		Ok(result[0])
 	}
 
 	/// Like `is_valid_multi_context`, but aliases are returned, not provided.
 	fn validate_multi_context(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		contexts: &[&[u8]],
@@ -253,15 +257,13 @@ pub trait GenerateVerifiable {
 	/// Currently only supports single-context proofs. Multi-context proofs should be
 	/// validated individually via [`Self::validate_multi_context`].
 	fn batch_validate(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
 	) -> Result<Vec<Alias>, ()> {
 		proofs
 			.iter()
-			.map(|item| {
-				Self::validate(capacity, &item.proof, members, &item.context, &item.message)
-			})
+			.map(|item| Self::validate(config, &item.proof, members, &item.context, &item.message))
 			.collect()
 	}
 
@@ -293,7 +295,7 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	/// Combines [`GenerateVerifiable::open`] and [`GenerateVerifiable::create`].
 	#[cfg(feature = "prover")]
 	pub fn create<'a>(
-		capacity: Gen::Capacity,
+		config: Gen::Config,
 		secret: &Gen::Secret,
 		members: impl Iterator<Item = Gen::Member>,
 		context: &[u8],
@@ -302,7 +304,7 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	where
 		Gen::Member: 'a,
 	{
-		let commitment = Gen::open(capacity, &Gen::member_from_secret(secret), members)?;
+		let commitment = Gen::open(config, &Gen::member_from_secret(secret), members)?;
 		let (proof, alias) = Gen::create(commitment, secret, context, &message)?;
 		Ok(Self {
 			proof,
@@ -328,24 +330,19 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	/// the receipt back so it can be inspected or retried.
 	pub fn verify(
 		self,
-		capacity: Gen::Capacity,
+		config: Gen::Config,
 		members: &Gen::Members,
 		context: &[u8],
 	) -> Result<(Alias, Vec<u8>), Self> {
-		match Gen::validate(capacity, &self.proof, members, context, &self.message) {
+		match Gen::validate(config, &self.proof, members, context, &self.message) {
 			Ok(alias) => Ok((alias, self.message)),
 			Err(()) => Err(self),
 		}
 	}
 	/// Check whether this receipt contains a valid proof for the given `members` and `context`.
-	pub fn is_valid(
-		&self,
-		capacity: Gen::Capacity,
-		members: &Gen::Members,
-		context: &[u8],
-	) -> bool {
+	pub fn is_valid(&self, config: Gen::Config, members: &Gen::Members, context: &[u8]) -> bool {
 		Gen::is_valid(
-			capacity,
+			config,
 			&self.proof,
 			members,
 			context,
