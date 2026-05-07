@@ -5,8 +5,8 @@ pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
-	ring::{RingSuite, Verifier},
 	VrfIo,
+	ring::{RingSuite, Verifier},
 };
 use bounded_collections::{BoundedVec, Get};
 use parity_scale_codec::{Decode, Encode};
@@ -49,8 +49,7 @@ impl TryFrom<u32> for RingDomainSize {
 impl RingDomainSize {
 	/// All variants, in declaration order. Reuse this instead of redefining
 	/// the array at call sites.
-	pub(crate) const VARIANTS: [Self; 3] =
-		[Self::Domain11, Self::Domain12, Self::Domain16];
+	pub(crate) const VARIANTS: [Self; 3] = [Self::Domain11, Self::Domain12, Self::Domain16];
 
 	/// Returns the domain size as a power of 2.
 	pub const fn as_power(self) -> u32 {
