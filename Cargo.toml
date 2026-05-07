@@ -53,4 +53,7 @@ no-std-prover = [
     "prover",
     "ark-vrf/test-vectors",
 ]
-testing = ["sha2"]
+# Exposes the `mock` module with a non-cryptographic `Mock` implementation
+# of `GenerateVerifiable`. Intended as a test double for downstream crates
+# that exercise code consuming the trait without the ring-VRF machinery.
+mock = ["sha2"]

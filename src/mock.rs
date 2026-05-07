@@ -1,4 +1,4 @@
-//! Toy implementation of [`GenerateVerifiable`] for tests.
+//! Mock implementation of [`GenerateVerifiable`] for tests.
 //!
 //! This is a non-cryptographic implementation: there is no anonymity (the proof
 //! reveals which member produced it), and "signatures" are trivially forgeable
@@ -22,11 +22,11 @@ use sha2::{Digest, Sha256};
 pub const MAX_MEMBERS: u32 = 1024;
 pub const MAX_CONTEXTS: u32 = 3;
 
-const TAG_ALIAS: &[u8] = b"verifiable-demo:v1:alias";
-const TAG_SIG: &[u8] = b"verifiable-demo:v1:sig";
-const TAG_PROOF: &[u8] = b"verifiable-demo:v1:proof";
+const TAG_ALIAS: &[u8] = b"verifiable-mock:v1:alias";
+const TAG_SIG: &[u8] = b"verifiable-mock:v1:sig";
+const TAG_PROOF: &[u8] = b"verifiable-mock:v1:proof";
 
-/// [`Capacity`] impl for the demo (no ring VRF).
+/// [`Capacity`] impl for the mock (no ring VRF).
 impl Capacity for () {
 	fn size(&self) -> usize {
 		MAX_MEMBERS as usize
@@ -70,26 +70,26 @@ fn make_proof_tag(
 	h(TAG_PROOF, &parts)
 }
 
-/// Proof for [`Simple`]. The `tag` is a hash that binds the member, contexts,
+/// Proof for [`Mock`]. The `tag` is a hash that binds the member, contexts,
 /// aliases, and message together; the verifier recomputes it and compares.
 #[derive(Default, Clone, Eq, PartialEq, Encode, Decode, DecodeWithMemTracking, Debug, TypeInfo)]
-pub struct SimpleProof {
+pub struct MockProof {
 	pub tag: [u8; 32],
 	pub member: [u8; 32],
 	pub aliases: BoundedVec<Alias, ConstU32<MAX_CONTEXTS>>,
 }
 
-/// Toy [`GenerateVerifiable`] implementation.
+/// Mock [`GenerateVerifiable`] implementation.
 #[derive(Debug)]
-pub struct Simple;
+pub struct Mock;
 
-impl GenerateVerifiable for Simple {
+impl GenerateVerifiable for Mock {
 	type Members = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
 	type Intermediate = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
-	type Proof = SimpleProof;
+	type Proof = MockProof;
 	type Signature = [u8; 32];
 	type StaticChunk = ();
 	type Capacity = ();
@@ -153,7 +153,7 @@ impl GenerateVerifiable for Simple {
 		let aliases: Vec<Alias> = contexts.iter().map(|ctx| make_alias(secret, ctx)).collect();
 		let bounded = BoundedVec::try_from(aliases.clone()).map_err(|_| ())?;
 		let tag = make_proof_tag(secret, contexts, &aliases, message);
-		let proof = SimpleProof {
+		let proof = MockProof {
 			tag,
 			member,
 			aliases: bounded,
@@ -168,7 +168,7 @@ impl GenerateVerifiable for Simple {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<Vec<Alias>, ()> {
-		let SimpleProof {
+		let MockProof {
 			tag,
 			member,
 			aliases,
@@ -218,26 +218,26 @@ impl GenerateVerifiable for Simple {
 mod tests {
 	use super::*;
 
-	fn make_members(secrets: &[[u8; 32]]) -> <Simple as GenerateVerifiable>::Members {
-		let mut inter = Simple::start_members(());
-		let members = secrets.iter().map(Simple::member_from_secret);
-		Simple::push_members(&mut inter, members, |_| Ok(vec![()])).unwrap();
-		Simple::finish_members(inter)
+	fn make_members(secrets: &[[u8; 32]]) -> <Mock as GenerateVerifiable>::Members {
+		let mut inter = Mock::start_members(());
+		let members = secrets.iter().map(Mock::member_from_secret);
+		Mock::push_members(&mut inter, members, |_| Ok(vec![()])).unwrap();
+		Mock::finish_members(inter)
 	}
 
 	#[cfg(feature = "prover")]
 	#[test]
 	fn create_and_verify() {
-		let alice_sec = Simple::new_secret([0u8; 32]);
-		let bob_sec = Simple::new_secret([1u8; 32]);
-		let charlie_sec = Simple::new_secret([2u8; 32]);
+		let alice_sec = Mock::new_secret([0u8; 32]);
+		let bob_sec = Mock::new_secret([1u8; 32]);
+		let charlie_sec = Mock::new_secret([2u8; 32]);
 		let members = make_members(&[alice_sec, bob_sec]);
 
 		let context = b"ctx";
 		let message = b"hello";
 
-		type SimpleReceipt = Receipt<Simple>;
-		let receipt = SimpleReceipt::create(
+		type MockReceipt = Receipt<Mock>;
+		let receipt = MockReceipt::create(
 			(),
 			&alice_sec,
 			members.iter().cloned(),
@@ -250,7 +250,7 @@ mod tests {
 		assert_eq!(alias, make_alias(&alice_sec, context));
 
 		// Charlie (not a member) cannot create a proof.
-		assert!(SimpleReceipt::create(
+		assert!(MockReceipt::create(
 			(),
 			&charlie_sec,
 			members.iter().cloned(),
@@ -263,66 +263,66 @@ mod tests {
 	#[cfg(feature = "prover")]
 	#[test]
 	fn proof_binds_to_message() {
-		let secret = Simple::new_secret([7u8; 32]);
-		let member = Simple::member_from_secret(&secret);
+		let secret = Mock::new_secret([7u8; 32]);
+		let member = Mock::member_from_secret(&secret);
 		let members = make_members(&[secret]);
 
-		let commitment = Simple::open((), &member, members.iter().cloned()).unwrap();
+		let commitment = Mock::open((), &member, members.iter().cloned()).unwrap();
 		let (proof, _) =
-			Simple::create_multi_context(commitment, &secret, &[b"ctx"], b"msg").unwrap();
+			Mock::create_multi_context(commitment, &secret, &[b"ctx"], b"msg").unwrap();
 
-		assert!(Simple::validate((), &proof, &members, b"ctx", b"msg").is_ok());
+		assert!(Mock::validate((), &proof, &members, b"ctx", b"msg").is_ok());
 		// Different message must fail.
-		assert!(Simple::validate((), &proof, &members, b"ctx", b"other").is_err());
+		assert!(Mock::validate((), &proof, &members, b"ctx", b"other").is_err());
 	}
 
 	#[cfg(feature = "prover")]
 	#[test]
 	fn proof_binds_to_context() {
-		let secret = Simple::new_secret([7u8; 32]);
-		let member = Simple::member_from_secret(&secret);
+		let secret = Mock::new_secret([7u8; 32]);
+		let member = Mock::member_from_secret(&secret);
 		let members = make_members(&[secret]);
 
-		let commitment = Simple::open((), &member, members.iter().cloned()).unwrap();
+		let commitment = Mock::open((), &member, members.iter().cloned()).unwrap();
 		let (proof, _) =
-			Simple::create_multi_context(commitment, &secret, &[b"a"], b"msg").unwrap();
+			Mock::create_multi_context(commitment, &secret, &[b"a"], b"msg").unwrap();
 
-		assert!(Simple::validate((), &proof, &members, b"a", b"msg").is_ok());
+		assert!(Mock::validate((), &proof, &members, b"a", b"msg").is_ok());
 		// Wrong context must fail (alias mismatch).
-		assert!(Simple::validate((), &proof, &members, b"b", b"msg").is_err());
+		assert!(Mock::validate((), &proof, &members, b"b", b"msg").is_err());
 	}
 
 	#[cfg(feature = "prover")]
 	#[test]
 	fn proof_rejected_for_non_member() {
-		let prover_sec = Simple::new_secret([7u8; 32]);
-		let prover = Simple::member_from_secret(&prover_sec);
+		let prover_sec = Mock::new_secret([7u8; 32]);
+		let prover = Mock::member_from_secret(&prover_sec);
 		let prover_members = make_members(&[prover_sec]);
 
-		let commitment = Simple::open((), &prover, prover_members.iter().cloned()).unwrap();
+		let commitment = Mock::open((), &prover, prover_members.iter().cloned()).unwrap();
 		let (proof, _) =
-			Simple::create_multi_context(commitment, &prover_sec, &[b"ctx"], b"msg").unwrap();
+			Mock::create_multi_context(commitment, &prover_sec, &[b"ctx"], b"msg").unwrap();
 
 		// Different member set that does not contain the prover.
-		let other = make_members(&[Simple::new_secret([8u8; 32])]);
-		assert!(Simple::validate((), &proof, &other, b"ctx", b"msg").is_err());
+		let other = make_members(&[Mock::new_secret([8u8; 32])]);
+		assert!(Mock::validate((), &proof, &other, b"ctx", b"msg").is_err());
 	}
 
 	#[cfg(feature = "prover")]
 	#[test]
 	fn multi_context() {
-		let secret = Simple::new_secret([0u8; 32]);
-		let member = Simple::member_from_secret(&secret);
+		let secret = Mock::new_secret([0u8; 32]);
+		let member = Mock::member_from_secret(&secret);
 		let members = make_members(&[secret]);
 
 		let contexts: Vec<&[u8]> = vec![b"ctx1", b"ctx2"];
-		let commitment = Simple::open((), &member, members.iter().cloned()).unwrap();
+		let commitment = Mock::open((), &member, members.iter().cloned()).unwrap();
 		let (proof, aliases) =
-			Simple::create_multi_context(commitment, &secret, &contexts, b"msg").unwrap();
+			Mock::create_multi_context(commitment, &secret, &contexts, b"msg").unwrap();
 
 		assert_eq!(aliases.len(), 2);
 		assert_ne!(aliases[0], aliases[1]);
-		assert!(Simple::is_valid_multi_context(
+		assert!(Mock::is_valid_multi_context(
 			(),
 			&proof,
 			&members,
@@ -332,7 +332,7 @@ mod tests {
 		));
 		// Swapped aliases must fail.
 		let swapped = vec![aliases[1], aliases[0]];
-		assert!(!Simple::is_valid_multi_context(
+		assert!(!Mock::is_valid_multi_context(
 			(),
 			&proof,
 			&members,
@@ -344,34 +344,34 @@ mod tests {
 
 	#[test]
 	fn signature_binds_to_message() {
-		let secret = Simple::new_secret([42u8; 32]);
-		let member = Simple::member_from_secret(&secret);
-		let sig = Simple::sign(&secret, b"msg").unwrap();
-		assert!(Simple::verify_signature(&sig, b"msg", &member));
+		let secret = Mock::new_secret([42u8; 32]);
+		let member = Mock::member_from_secret(&secret);
+		let sig = Mock::sign(&secret, b"msg").unwrap();
+		assert!(Mock::verify_signature(&sig, b"msg", &member));
 		// Different message must fail.
-		assert!(!Simple::verify_signature(&sig, b"other", &member));
+		assert!(!Mock::verify_signature(&sig, b"other", &member));
 		// Different member must fail.
-		let other = Simple::member_from_secret(&Simple::new_secret([43u8; 32]));
-		assert!(!Simple::verify_signature(&sig, b"msg", &other));
+		let other = Mock::member_from_secret(&Mock::new_secret([43u8; 32]));
+		assert!(!Mock::verify_signature(&sig, b"msg", &other));
 	}
 
 	#[test]
 	fn alias_is_collision_resistant_per_context() {
-		let secret = Simple::new_secret([1u8; 32]);
-		let a1 = Simple::alias_in_context(&secret, b"ctx1").unwrap();
-		let a2 = Simple::alias_in_context(&secret, b"ctx2").unwrap();
+		let secret = Mock::new_secret([1u8; 32]);
+		let a1 = Mock::alias_in_context(&secret, b"ctx1").unwrap();
+		let a2 = Mock::alias_in_context(&secret, b"ctx2").unwrap();
 		assert_ne!(a1, a2);
 		// Trailing-zero distinguishability (broken in the old XOR-fold hash).
-		let a3 = Simple::alias_in_context(&secret, b"ctx1\x00").unwrap();
+		let a3 = Mock::alias_in_context(&secret, b"ctx1\x00").unwrap();
 		assert_ne!(a1, a3);
 	}
 
 	#[test]
 	fn duplicate_member_rejected() {
-		let secret = Simple::new_secret([0u8; 32]);
-		let member = Simple::member_from_secret(&secret);
-		let mut inter = Simple::start_members(());
-		assert!(Simple::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).is_ok());
-		assert!(Simple::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).is_err());
+		let secret = Mock::new_secret([0u8; 32]);
+		let member = Mock::member_from_secret(&secret);
+		let mut inter = Mock::start_members(());
+		assert!(Mock::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).is_ok());
+		assert!(Mock::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).is_err());
 	}
 }
