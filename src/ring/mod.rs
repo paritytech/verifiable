@@ -5,8 +5,8 @@ pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
-	VrfIo,
 	ring::{RingSuite, Verifier},
+	VrfIo,
 };
 use bounded_collections::{BoundedVec, Get};
 use parity_scale_codec::{Decode, Encode};
@@ -47,13 +47,10 @@ impl TryFrom<u32> for RingDomainSize {
 	}
 }
 
-impl From<RingDomainSize> for u32 {
-	fn from(value: RingDomainSize) -> Self {
-		value.value()
-	}
-}
-
 impl RingDomainSize {
+	/// Number of variants. Used to size per-domain caches.
+	pub(crate) const COUNT: usize = 3;
+
 	/// Returns the domain size as a power of 2.
 	pub const fn as_power(self) -> u32 {
 		match self {
@@ -71,6 +68,15 @@ impl RingDomainSize {
 	/// The max ring that can be handled for both sign/verify at this domain size.
 	pub const fn max_ring_size<S: RingSuite>(self) -> usize {
 		ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(self.value() as usize)
+	}
+
+	/// Stable dense index in `[0, COUNT)`. Used to key per-domain caches.
+	pub(crate) const fn index(self) -> usize {
+		match self {
+			RingDomainSize::Domain11 => 0,
+			RingDomainSize::Domain12 => 1,
+			RingDomainSize::Domain16 => 2,
+		}
 	}
 }
 

@@ -30,15 +30,9 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
 		type P = ark_vrf::ring::RingContext<BandersnatchSha512Ell2>;
-		static D11: Once<P> = Once::new();
-		static D12: Once<P> = Once::new();
-		static D16: Once<P> = Once::new();
-		let init = || make_ring_context(domain_size);
-		match domain_size {
-			RingDomainSize::Domain11 => D11.call_once(init),
-			RingDomainSize::Domain12 => D12.call_once(init),
-			RingDomainSize::Domain16 => D16.call_once(init),
-		}
+		static CELLS: [Once<P>; RingDomainSize::COUNT] =
+			[const { Once::new() }; RingDomainSize::COUNT];
+		CELLS[domain_size.index()].call_once(|| make_ring_context(domain_size))
 	}
 }
 
@@ -55,15 +49,9 @@ impl ProverCache<BandersnatchSha512Ell2> for BandersnatchProverCache {
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
 		type P = ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>;
-		static D11: Once<P> = Once::new();
-		static D12: Once<P> = Once::new();
-		static D16: Once<P> = Once::new();
-		let init = || make_ring_setup(domain_size);
-		match domain_size {
-			RingDomainSize::Domain11 => D11.call_once(init),
-			RingDomainSize::Domain12 => D12.call_once(init),
-			RingDomainSize::Domain16 => D16.call_once(init),
-		}
+		static CELLS: [Once<P>; RingDomainSize::COUNT] =
+			[const { Once::new() }; RingDomainSize::COUNT];
+		CELLS[domain_size.index()].call_once(|| make_ring_setup(domain_size))
 	}
 }
 
