@@ -173,7 +173,7 @@ mod tests {
 		assert_eq!(internal.compressed_size(), S::PUBLIC_KEY_SIZE);
 
 		// MEMBERS_SET_SIZE (uncompressed, TRUSTED_SOURCE encoding)
-		let members_set = BandersnatchVrfVerifiable::start_members(RingDomainSize::Domain11.into());
+		let members_set = BandersnatchVrfVerifiable::start_members(RingDomainSize::Domain11);
 		assert_eq!(members_set.uncompressed_size(), S::MEMBERS_SET_SIZE);
 		assert_eq!(MembersSet::max_encoded_len(), S::MEMBERS_SET_SIZE);
 
@@ -204,7 +204,6 @@ mod tests {
 		use ark_serialize::Compress;
 		type S = BandersnatchSha512Ell2;
 
-		let capacity = RingDomainSize::Domain11;
 		let secrets: Vec<_> = (0..3)
 			.map(|i| BandersnatchVrfVerifiable::new_secret([i; 32]))
 			.collect();
@@ -213,9 +212,12 @@ mod tests {
 			.map(BandersnatchVrfVerifiable::member_from_secret)
 			.collect();
 
-		let commitment =
-			BandersnatchVrfVerifiable::open(capacity, &member_keys[0], member_keys.iter().cloned())
-				.unwrap();
+		let commitment = BandersnatchVrfVerifiable::open(
+			RingDomainSize::Domain11,
+			&member_keys[0],
+			member_keys.iter().cloned(),
+		)
+		.unwrap();
 
 		// Single context: verify raw bytes match RING_PROOF_SIZE + 1 + VRF_OUTPUT_SIZE
 		let (proof, _) =
@@ -371,8 +373,7 @@ mod builder_tests {
 	}
 
 	test_for_all_domains!(check_pre_constructed_ring_builder, |domain_size| {
-		let ring_size = domain_size.into();
-		let builder = BandersnatchVrfVerifiable::start_members(ring_size);
+		let builder = BandersnatchVrfVerifiable::start_members(domain_size);
 		let builder_params = ring_verifier_builder_params::<BandersnatchSha512Ell2>(domain_size);
 		let (builder2, builder_params2) = start_members_from_params(domain_size);
 
@@ -390,7 +391,6 @@ mod builder_tests {
 	});
 
 	test_for_all_domains!(check_precomputed_size, |domain_size| {
-		let ring_size = domain_size.into();
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
 		let internal = crate::ring::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(
@@ -402,7 +402,7 @@ mod builder_tests {
 			<BandersnatchSha512Ell2 as RingSuiteExt>::PUBLIC_KEY_SIZE
 		);
 
-		let members = BandersnatchVrfVerifiable::start_members(ring_size);
+		let members = BandersnatchVrfVerifiable::start_members(domain_size);
 		assert_eq!(members.uncompressed_size(), MembersSet::max_encoded_len());
 
 		let commitment = BandersnatchVrfVerifiable::finish_members(members);

@@ -27,11 +27,11 @@ const UNCOMPRESSED: ark_scale::Usage =
 /// This determines the maximum ring size that can be supported for a ring suite.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, DecodeWithMemTracking)]
 pub enum RingDomainSize {
-	/// Domain size 2^11
+	/// Domain size 2^11 (max 255 members)
 	Domain11,
-	/// Domain size 2^12
+	/// Domain size 2^12 (max 767 members)
 	Domain12,
-	/// Domain size 2^16
+	/// Domain size 2^16 (max 16127 members)
 	Domain16,
 }
 
@@ -69,7 +69,7 @@ impl RingDomainSize {
 	}
 
 	/// The max ring that can be handled for both sign/verify at this domain size.
-	pub const fn max_ring_size<S: RingSuiteExt>(self) -> usize {
+	pub const fn max_ring_size<S: RingSuite>(self) -> usize {
 		ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(self.value() as usize)
 	}
 }
