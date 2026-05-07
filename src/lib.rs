@@ -14,14 +14,6 @@ use scale_info::*;
 pub mod mock;
 pub mod ring;
 
-/// Trait for capacity types used in ring operations.
-///
-/// The capacity determines the maximum ring size that can be supported.
-pub trait Capacity: Clone + Copy {
-	/// Returns the maximum ring size for this capacity.
-	fn size(&self) -> usize;
-}
-
 // Fixed types:
 
 /// Cryptographic identifier for a person within a specific application which deals with people.
@@ -102,8 +94,7 @@ pub trait GenerateVerifiable {
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 
 	/// The capacity type used to parametrize ring operations.
-	/// Must implement the `Capacity` trait which provides `size()`.
-	type Capacity: Clone + Copy + Capacity;
+	type Capacity: Clone + Copy;
 
 	/// A signature attributable to a specific `Member`, verifiable against that member's
 	/// public key.

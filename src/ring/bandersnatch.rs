@@ -97,10 +97,7 @@ mod tests {
 	use ark_vrf::ring::SrsLookup;
 
 	use super::*;
-	use crate::{
-		Capacity, GenerateVerifiable,
-		ring::{RingSize, ring_signature_size},
-	};
+	use crate::{GenerateVerifiable, ring::ring_signature_size};
 
 	// Type aliases for Bandersnatch-specific generic types
 	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
@@ -154,8 +151,10 @@ mod tests {
 			(RingDomainSize::Domain16, 16127),
 		];
 		for (dom_size, exp_ring_size) in DOM_TO_RING_SIZE_MAP {
-			let ring_size = RingSize::<BandersnatchSha512Ell2>::from(dom_size);
-			assert_eq!(ring_size.size(), exp_ring_size);
+			assert_eq!(
+				dom_size.max_ring_size::<BandersnatchSha512Ell2>(),
+				exp_ring_size
+			);
 		}
 	}
 
@@ -174,7 +173,7 @@ mod tests {
 		assert_eq!(internal.compressed_size(), S::PUBLIC_KEY_SIZE);
 
 		// MEMBERS_SET_SIZE (uncompressed, TRUSTED_SOURCE encoding)
-		let members_set = BandersnatchVrfVerifiable::start_members(RingDomainSize::Domain11.into());
+		let members_set = BandersnatchVrfVerifiable::start_members(RingDomainSize::Domain11);
 		assert_eq!(members_set.uncompressed_size(), S::MEMBERS_SET_SIZE);
 		assert_eq!(MembersSet::max_encoded_len(), S::MEMBERS_SET_SIZE);
 
@@ -205,7 +204,6 @@ mod tests {
 		use ark_serialize::Compress;
 		type S = BandersnatchSha512Ell2;
 
-		let capacity: crate::ring::RingSize<S> = RingDomainSize::Domain11.into();
 		let secrets: Vec<_> = (0..3)
 			.map(|i| BandersnatchVrfVerifiable::new_secret([i; 32]))
 			.collect();
@@ -214,9 +212,12 @@ mod tests {
 			.map(BandersnatchVrfVerifiable::member_from_secret)
 			.collect();
 
-		let commitment =
-			BandersnatchVrfVerifiable::open(capacity, &member_keys[0], member_keys.iter().cloned())
-				.unwrap();
+		let commitment = BandersnatchVrfVerifiable::open(
+			RingDomainSize::Domain11,
+			&member_keys[0],
+			member_keys.iter().cloned(),
+		)
+		.unwrap();
 
 		// Single context: verify raw bytes match RING_PROOF_SIZE + 1 + VRF_OUTPUT_SIZE
 		let (proof, _) =
@@ -244,7 +245,7 @@ mod tests {
 
 #[cfg(test)]
 mod builder_tests {
-	use crate::{Capacity, GenerateVerifiable, ring::ring_verifier_builder_params};
+	use crate::{GenerateVerifiable, ring::ring_verifier_builder_params};
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
@@ -255,8 +256,6 @@ mod builder_tests {
 	use tests::{
 		MembersCommitment, MembersSet, bandersnatch_ring_setup, start_members_from_params,
 	};
-
-	pub type RingSize = crate::ring::RingSize<BandersnatchSha512Ell2>;
 
 	/// Macro to generate test functions for all implemented domain sizes.
 	///
@@ -374,8 +373,7 @@ mod builder_tests {
 	}
 
 	test_for_all_domains!(check_pre_constructed_ring_builder, |domain_size| {
-		let ring_size = domain_size.into();
-		let builder = BandersnatchVrfVerifiable::start_members(ring_size);
+		let builder = BandersnatchVrfVerifiable::start_members(domain_size);
 		let builder_params = ring_verifier_builder_params::<BandersnatchSha512Ell2>(domain_size);
 		let (builder2, builder_params2) = start_members_from_params(domain_size);
 
@@ -393,7 +391,6 @@ mod builder_tests {
 	});
 
 	test_for_all_domains!(check_precomputed_size, |domain_size| {
-		let ring_size = domain_size.into();
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
 		let internal = crate::ring::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(
@@ -405,7 +402,7 @@ mod builder_tests {
 			<BandersnatchSha512Ell2 as RingSuiteExt>::PUBLIC_KEY_SIZE
 		);
 
-		let members = BandersnatchVrfVerifiable::start_members(ring_size);
+		let members = BandersnatchVrfVerifiable::start_members(domain_size);
 		assert_eq!(members.uncompressed_size(), MembersSet::max_encoded_len());
 
 		let commitment = BandersnatchVrfVerifiable::finish_members(members);
@@ -416,7 +413,6 @@ mod builder_tests {
 	});
 
 	test_for_all_domains!(start_push_finish, |domain_size| {
-		let capacity: RingSize = domain_size.into();
 		let alice_sec = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let bob_sec = BandersnatchVrfVerifiable::new_secret([1u8; 32]);
 		let charlie_sec = BandersnatchVrfVerifiable::new_secret([2u8; 32]);
@@ -425,7 +421,7 @@ mod builder_tests {
 		let bob = BandersnatchVrfVerifiable::member_from_secret(&bob_sec);
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
 
-		let mut inter1 = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter1 = BandersnatchVrfVerifiable::start_members(domain_size);
 		let mut inter2 = inter1.clone();
 		let builder_params = ring_verifier_builder_params::<BandersnatchSha512Ell2>(domain_size);
 
@@ -459,7 +455,6 @@ mod builder_tests {
 	});
 
 	test_for_all_domains!(start_push_finish_multiple_members, |domain_size| {
-		let capacity: RingSize = domain_size.into();
 		let alice_sec = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let bob_sec = BandersnatchVrfVerifiable::new_secret([1u8; 32]);
 		let charlie_sec = BandersnatchVrfVerifiable::new_secret([2u8; 32]);
@@ -469,7 +464,7 @@ mod builder_tests {
 		let charlie = BandersnatchVrfVerifiable::member_from_secret(&charlie_sec);
 
 		// First set is everyone all at once with the regular starting root.
-		let mut inter1 = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter1 = BandersnatchVrfVerifiable::start_members(domain_size);
 		// Second set is everyone all at once but with a starting root constructed from params.
 		let (mut inter2, builder_params) = start_members_from_params(domain_size);
 
@@ -485,9 +480,9 @@ mod builder_tests {
 		};
 
 		// Third set is everyone added one by one.
-		let mut inter3 = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter3 = BandersnatchVrfVerifiable::start_members(domain_size);
 		// Fourth set is a single addition followed by a group addition.
-		let mut inter4 = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter4 = BandersnatchVrfVerifiable::start_members(domain_size);
 
 		// Construct the first set with all members added simultaneously.
 		BandersnatchVrfVerifiable::push_members(
@@ -534,7 +529,6 @@ mod builder_tests {
 	test_for_all_domains!(open_validate_works, |domain_size| {
 		use std::time::Instant;
 
-		let capacity: RingSize = domain_size.into();
 		let context = b"Context";
 		let message = b"FooBar";
 
@@ -555,7 +549,7 @@ mod builder_tests {
 
 		let start = Instant::now();
 		let commitment =
-			BandersnatchVrfVerifiable::open(capacity, &member, members.clone().into_iter())
+			BandersnatchVrfVerifiable::open(domain_size, &member, members.clone().into_iter())
 				.unwrap();
 		println!("* Open: {} ms", (Instant::now() - start).as_millis());
 		println!("  Commitment size: {} bytes", commitment.encode().len());
@@ -582,7 +576,7 @@ mod builder_tests {
 		};
 
 		let start = Instant::now();
-		let mut inter = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
 		println!(
 			"* Start members: {} ms",
 			(Instant::now() - start).as_millis()
@@ -609,7 +603,7 @@ mod builder_tests {
 
 		let start = Instant::now();
 		let alias2 =
-			BandersnatchVrfVerifiable::validate(capacity, &proof, &members, context, message)
+			BandersnatchVrfVerifiable::validate(domain_size, &proof, &members, context, message)
 				.unwrap();
 		println!("* Validate {} ms", (Instant::now() - start).as_millis());
 		assert_eq!(alias, alias2);
@@ -624,7 +618,6 @@ mod builder_tests {
 		use crate::BatchProofItem;
 		use std::time::Instant;
 
-		let capacity: RingSize = domain_size.into();
 		let context = b"Context";
 		let num_members = 10;
 		let num_proofs = 5;
@@ -646,9 +639,12 @@ mod builder_tests {
 		for i in 0..num_proofs {
 			let member = member_keys[i];
 			let message = format!("Message from member {}", i);
-			let commitment =
-				BandersnatchVrfVerifiable::open(capacity, &member, member_keys.clone().into_iter())
-					.unwrap();
+			let commitment = BandersnatchVrfVerifiable::open(
+				domain_size,
+				&member,
+				member_keys.clone().into_iter(),
+			)
+			.unwrap();
 			let (proof, alias) = BandersnatchVrfVerifiable::create(
 				commitment,
 				&secrets[i],
@@ -672,7 +668,7 @@ mod builder_tests {
 				})
 				.ok_or(())
 		};
-		let mut inter = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
 		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().copied(), get_many)
 			.unwrap();
 		let members = BandersnatchVrfVerifiable::finish_members(inter);
@@ -681,7 +677,7 @@ mod builder_tests {
 		let start = Instant::now();
 		for (proof, message, expected_alias) in &proofs {
 			let alias_out = BandersnatchVrfVerifiable::validate(
-				capacity,
+				domain_size,
 				proof,
 				&members,
 				context,
@@ -708,7 +704,7 @@ mod builder_tests {
 
 		let start = Instant::now();
 		let aliases =
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &batch_items).unwrap();
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &batch_items).unwrap();
 		let batch_ms = (Instant::now() - start).as_millis();
 		println!("* Batch validate {} proofs: {} ms", num_proofs, batch_ms);
 
@@ -727,7 +723,6 @@ mod builder_tests {
 	test_for_all_domains!(batch_validate_rejects_invalid_proof, |domain_size| {
 		use crate::BatchProofItem;
 
-		let capacity: RingSize = domain_size.into();
 		let context = b"Context";
 		let num_members = 5;
 
@@ -747,9 +742,12 @@ mod builder_tests {
 		for i in 0..3 {
 			let member = member_keys[i];
 			let message = format!("Message from member {}", i);
-			let commitment =
-				BandersnatchVrfVerifiable::open(capacity, &member, member_keys.clone().into_iter())
-					.unwrap();
+			let commitment = BandersnatchVrfVerifiable::open(
+				domain_size,
+				&member,
+				member_keys.clone().into_iter(),
+			)
+			.unwrap();
 			let (proof, _alias) = BandersnatchVrfVerifiable::create(
 				commitment,
 				&secrets[i],
@@ -776,14 +774,14 @@ mod builder_tests {
 				})
 				.ok_or(())
 		};
-		let mut inter = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
 		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().copied(), get_many)
 			.unwrap();
 		let members = BandersnatchVrfVerifiable::finish_members(inter);
 
 		// Sanity: batch with all valid proofs should pass
 		assert!(
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &batch_items,).is_ok()
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &batch_items,).is_ok()
 		);
 
 		// Corrupt the proof of the second item by flipping a byte in the proof data
@@ -791,7 +789,7 @@ mod builder_tests {
 		corrupted_items[1].proof[10] ^= 0xFF;
 
 		assert!(
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &corrupted_items,)
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &corrupted_items,)
 				.is_err()
 		);
 
@@ -800,7 +798,7 @@ mod builder_tests {
 		wrong_message_items[2].message = b"tampered message".to_vec();
 
 		assert!(
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &wrong_message_items,)
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &wrong_message_items,)
 				.is_err()
 		);
 
@@ -813,7 +811,7 @@ mod builder_tests {
 		let mut extended_keys = member_keys.clone();
 		extended_keys.push(outsider_key);
 		let outsider_commitment =
-			BandersnatchVrfVerifiable::open(capacity, &outsider_key, extended_keys.into_iter())
+			BandersnatchVrfVerifiable::open(domain_size, &outsider_key, extended_keys.into_iter())
 				.unwrap();
 		let (outsider_proof, _) = BandersnatchVrfVerifiable::create(
 			outsider_commitment,
@@ -830,7 +828,7 @@ mod builder_tests {
 		});
 
 		assert!(
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &outsider_items,)
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &outsider_items,)
 				.is_err()
 		);
 
@@ -838,7 +836,7 @@ mod builder_tests {
 		let wrong_context = b"WrongContext";
 		let member = member_keys[0];
 		let wrong_ctx_commitment =
-			BandersnatchVrfVerifiable::open(capacity, &member, member_keys.clone().into_iter())
+			BandersnatchVrfVerifiable::open(domain_size, &member, member_keys.clone().into_iter())
 				.unwrap();
 		let (wrong_ctx_proof, _) = BandersnatchVrfVerifiable::create(
 			wrong_ctx_commitment,
@@ -855,7 +853,7 @@ mod builder_tests {
 		});
 
 		assert!(
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &wrong_ctx_items,)
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &wrong_ctx_items,)
 				.is_err()
 		);
 	});
@@ -863,13 +861,12 @@ mod builder_tests {
 	test_for_all_domains!(open_validate_single_vs_multiple_keys, |domain_size| {
 		use std::time::Instant;
 
-		let capacity: RingSize = domain_size.into();
 		let start = Instant::now();
 		let _ = bandersnatch_ring_setup(domain_size);
 		println!("* KZG decode: {} ms", (Instant::now() - start).as_millis());
 
 		// Use the domain's max ring size to test at capacity
-		let max_members = capacity.size();
+		let max_members = domain_size.max_ring_size::<BandersnatchSha512Ell2>();
 		println!(
 			"* Testing with {} members (max for {:?})",
 			max_members, domain_size
@@ -899,7 +896,7 @@ mod builder_tests {
 				.ok_or(())
 		};
 
-		let mut inter1 = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter1 = BandersnatchVrfVerifiable::start_members(domain_size);
 		let start = Instant::now();
 		members.iter().for_each(|member| {
 			BandersnatchVrfVerifiable::push_members(&mut inter1, [*member].into_iter(), get_many)
@@ -911,7 +908,7 @@ mod builder_tests {
 			(Instant::now() - start).as_millis()
 		);
 
-		let mut inter2 = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter2 = BandersnatchVrfVerifiable::start_members(domain_size);
 		let start = Instant::now();
 
 		BandersnatchVrfVerifiable::push_members(&mut inter2, members.iter().copied(), get_many)
@@ -926,8 +923,6 @@ mod builder_tests {
 	});
 
 	test_for_all_domains!(empty_context_works, |domain_size| {
-		let capacity: RingSize = domain_size.into();
-
 		let _ = bandersnatch_ring_setup(domain_size);
 
 		let secrets: Vec<_> = (0..3)
@@ -937,9 +932,12 @@ mod builder_tests {
 			.iter()
 			.map(BandersnatchVrfVerifiable::member_from_secret)
 			.collect();
-		let commitment =
-			BandersnatchVrfVerifiable::open(capacity, &member_keys[0], member_keys.iter().cloned())
-				.unwrap();
+		let commitment = BandersnatchVrfVerifiable::open(
+			domain_size,
+			&member_keys[0],
+			member_keys.iter().cloned(),
+		)
+		.unwrap();
 		let members = build_members(member_keys.iter().copied(), domain_size);
 
 		let contexts: [&[u8]; 0] = [];
@@ -955,13 +953,16 @@ mod builder_tests {
 
 		assert!(aliases.is_empty());
 		assert!(BandersnatchVrfVerifiable::is_valid_multi_context(
-			capacity, &proof, &members, &contexts, &aliases, message,
+			domain_size,
+			&proof,
+			&members,
+			&contexts,
+			&aliases,
+			message,
 		));
 	});
 
 	test_for_all_domains!(multi_context_works, |domain_size| {
-		let capacity: RingSize = domain_size.into();
-
 		let _ = bandersnatch_ring_setup(domain_size);
 
 		let secrets: Vec<_> = (0..10)
@@ -974,7 +975,7 @@ mod builder_tests {
 		let member_secret = secrets[5].clone();
 		let member = member_keys[5];
 		let commitment =
-			BandersnatchVrfVerifiable::open(capacity, &member, member_keys.iter().cloned())
+			BandersnatchVrfVerifiable::open(domain_size, &member, member_keys.iter().cloned())
 				.unwrap();
 		let members = build_members(member_keys.iter().copied(), domain_size);
 
@@ -994,7 +995,12 @@ mod builder_tests {
 		.unwrap();
 
 		assert!(BandersnatchVrfVerifiable::is_valid_multi_context(
-			capacity, &proof, &members, &contexts, &aliases, message,
+			domain_size,
+			&proof,
+			&members,
+			&contexts,
+			&aliases,
+			message,
 		));
 
 		// Check that aliases produced by the `create` are the same as produced by `create_multi_context`
@@ -1024,7 +1030,6 @@ mod builder_tests {
 		use bounded_collections::BoundedVec;
 
 		let domain_size = RingDomainSize::Domain11;
-		let capacity: RingSize = domain_size.into();
 
 		let _ = bandersnatch_ring_setup(domain_size);
 
@@ -1037,9 +1042,12 @@ mod builder_tests {
 			.collect();
 
 		let members = build_members(member_keys.iter().copied(), domain_size);
-		let commitment =
-			BandersnatchVrfVerifiable::open(capacity, &member_keys[0], member_keys.iter().cloned())
-				.unwrap();
+		let commitment = BandersnatchVrfVerifiable::open(
+			domain_size,
+			&member_keys[0],
+			member_keys.iter().cloned(),
+		)
+		.unwrap();
 
 		let context = b"ctx";
 		let message = b"msg";
@@ -1048,7 +1056,7 @@ mod builder_tests {
 
 		// Original proof validates.
 		let alias_out =
-			BandersnatchVrfVerifiable::validate(capacity, &proof, &members, context, message)
+			BandersnatchVrfVerifiable::validate(domain_size, &proof, &members, context, message)
 				.unwrap();
 		assert_eq!(alias_out, alias);
 
@@ -1060,7 +1068,7 @@ mod builder_tests {
 
 		assert!(
 			BandersnatchVrfVerifiable::validate(
-				capacity,
+				domain_size,
 				&proof_malleated,
 				&members,
 				context,
@@ -1076,7 +1084,7 @@ mod builder_tests {
 			message: message.to_vec(),
 		}];
 		assert!(
-			BandersnatchVrfVerifiable::batch_validate(capacity, &members, &batch_items).is_err()
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &batch_items).is_err()
 		);
 	}
 
@@ -1084,8 +1092,6 @@ mod builder_tests {
 		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as GenerateVerifiable>::Member>,
 		domain_size: RingDomainSize,
 	) -> <BandersnatchVrfVerifiable as GenerateVerifiable>::Members {
-		let capacity: RingSize = domain_size.into();
-
 		let (_, builder_params) = start_members_from_params(domain_size);
 		let get_many = |range| {
 			(&builder_params)
@@ -1097,7 +1103,7 @@ mod builder_tests {
 				})
 				.ok_or(())
 		};
-		let mut inter = BandersnatchVrfVerifiable::start_members(capacity);
+		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
 		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys, get_many).unwrap();
 		BandersnatchVrfVerifiable::finish_members(inter)
 	}

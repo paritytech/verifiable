@@ -27,11 +27,11 @@ const UNCOMPRESSED: ark_scale::Usage =
 /// This determines the maximum ring size that can be supported for a ring suite.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, DecodeWithMemTracking)]
 pub enum RingDomainSize {
-	/// Domain size 2^11
+	/// Domain size 2^11 (max 255 members)
 	Domain11,
-	/// Domain size 2^12
+	/// Domain size 2^12 (max 767 members)
 	Domain12,
-	/// Domain size 2^16
+	/// Domain size 2^16 (max 16127 members)
 	Domain16,
 }
 
@@ -67,36 +67,10 @@ impl RingDomainSize {
 	pub const fn value(self) -> u32 {
 		1 << self.as_power()
 	}
-}
 
-/// Ring size configuration for a specific suite.
-///
-/// Wraps a [`RingDomainSize`] and computes the maximum ring capacity based on the
-/// suite's curve parameters. Different suites may yield different max ring sizes
-/// for the same domain size.
-///
-/// Example. For the Bandersnatch suite (`BandersnatchSha512Ell2`):
-/// - `Domain11`: max 255 members
-/// - `Domain12`: max 767 members
-/// - `Domain16`: max 16127 members
-#[derive(Clone, Copy, Encode, Decode, TypeInfo, DecodeWithMemTracking)]
-pub struct RingSize<S: RingSuiteExt> {
-	dom_size: RingDomainSize,
-	_phantom: PhantomData<S>,
-}
-
-impl<S: RingSuiteExt> From<RingDomainSize> for RingSize<S> {
-	fn from(dom_size: RingDomainSize) -> Self {
-		Self {
-			dom_size,
-			_phantom: PhantomData,
-		}
-	}
-}
-
-impl<S: RingSuiteExt> Capacity for RingSize<S> {
-	fn size(&self) -> usize {
-		max_ring_size_from_domain_size::<S>(self.dom_size)
+	/// The max ring that can be handled for both sign/verify at this domain size.
+	pub const fn max_ring_size<S: RingSuite>(self) -> usize {
+		ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(self.value() as usize)
 	}
 }
 
@@ -150,12 +124,6 @@ impl RingCurveParams for Bls12_381Params {
 	}
 }
 
-/// The max ring that can be handled for both sign/verify for the given PCS domain size.
-pub const fn max_ring_size_from_domain_size<S: RingSuiteExt>(domain_size: RingDomainSize) -> usize {
-	let pcs_domain_size = domain_size.value();
-	ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(pcs_domain_size as usize)
-}
-
 /// Construct ring setup from the suite's SRS data.
 #[cfg(feature = "prover")]
 pub fn make_ring_setup<S: RingSuiteExt>(
@@ -164,7 +132,7 @@ pub fn make_ring_setup<S: RingSuiteExt>(
 	let data = S::CurveParams::srs_raw();
 	let pcs_params =
 		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap();
-	let ring_size = RingSize::<S>::from(domain_size).size();
+	let ring_size = domain_size.max_ring_size::<S>();
 	ark_vrf::ring::RingSetup::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
 }
 
@@ -182,7 +150,7 @@ pub fn ring_verifier_builder_params<S: RingSuiteExt>(
 pub fn make_ring_context<S: RingSuiteExt>(
 	domain_size: RingDomainSize,
 ) -> ark_vrf::ring::RingContext<S> {
-	let ring_size = RingSize::<S>::from(domain_size).size();
+	let ring_size = domain_size.max_ring_size::<S>();
 	ark_vrf::ring::RingContext::<S>::new(ring_size)
 }
 
@@ -589,11 +557,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Proof = BoundedVec<u8, MaxRingVrfSignatureLen<S>>;
 	type Signature = S::SignatureBytes;
 	type StaticChunk = StaticChunk<S>;
-	type Capacity = RingSize<S>;
+	type Capacity = RingDomainSize;
 
 	fn start_members(capacity: Self::Capacity) -> Self::Intermediate {
 		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = S::CurveParams::empty_ring_commitment(capacity.dom_size);
+		let data = S::CurveParams::empty_ring_commitment(capacity);
 		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
 	}
 
@@ -643,7 +611,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<Vec<Alias>, ()> {
-		let verifier_params = S::VerifierCache::get(capacity.dom_size);
+		let verifier_params = S::VerifierCache::get(capacity);
 		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
@@ -683,7 +651,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
 	) -> Result<Vec<Alias>, ()> {
-		let verifier_params = S::VerifierCache::get(capacity.dom_size);
+		let verifier_params = S::VerifierCache::get(capacity);
 		let verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let mut aliases = Vec::with_capacity(proofs.len());
@@ -727,11 +695,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.collect::<Result<Vec<_>, _>>()?;
 		let member = PublicKey::<S>::deserialize_canonical(member.as_ref())?;
 		let prover_idx = pks.iter().position(|&m| m == member.0).ok_or(())? as u32;
-		let prover_key = S::ProverCache::get(capacity.dom_size)
+		let prover_key = S::ProverCache::get(capacity)
 			.prover_key(&pks)
 			.map_err(|_| ())?;
 		Ok(ProverState {
-			domain_size: capacity.dom_size.value(),
+			domain_size: capacity.value(),
 			prover_idx,
 			prover_key,
 		})
