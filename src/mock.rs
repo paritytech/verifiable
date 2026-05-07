@@ -250,14 +250,16 @@ mod tests {
 		assert_eq!(alias, make_alias(&alice_sec, context));
 
 		// Charlie (not a member) cannot create a proof.
-		assert!(MockReceipt::create(
-			(),
-			&charlie_sec,
-			members.iter().cloned(),
-			context,
-			message.to_vec(),
-		)
-		.is_err());
+		assert!(
+			MockReceipt::create(
+				(),
+				&charlie_sec,
+				members.iter().cloned(),
+				context,
+				message.to_vec(),
+			)
+			.is_err()
+		);
 	}
 
 	#[cfg(feature = "prover")]
@@ -284,8 +286,7 @@ mod tests {
 		let members = make_members(&[secret]);
 
 		let commitment = Mock::open((), &member, members.iter().cloned()).unwrap();
-		let (proof, _) =
-			Mock::create_multi_context(commitment, &secret, &[b"a"], b"msg").unwrap();
+		let (proof, _) = Mock::create_multi_context(commitment, &secret, &[b"a"], b"msg").unwrap();
 
 		assert!(Mock::validate((), &proof, &members, b"a", b"msg").is_ok());
 		// Wrong context must fail (alias mismatch).
