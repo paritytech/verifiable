@@ -72,7 +72,7 @@ fn make_proof_tag(
 
 /// Proof for [`Simple`]. The `tag` is a hash that binds the member, contexts,
 /// aliases, and message together; the verifier recomputes it and compares.
-#[derive(Clone, Eq, PartialEq, Encode, Decode, Debug, TypeInfo)]
+#[derive(Default, Clone, Eq, PartialEq, Encode, Decode, DecodeWithMemTracking, Debug, TypeInfo)]
 pub struct SimpleProof {
 	pub tag: [u8; 32],
 	pub member: [u8; 32],
