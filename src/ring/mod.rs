@@ -38,22 +38,19 @@ pub enum RingDomainSize {
 impl TryFrom<u32> for RingDomainSize {
 	type Error = ();
 	fn try_from(value: u32) -> Result<Self, Self::Error> {
-		const ALL: [RingDomainSize; 3] = [
-			RingDomainSize::Domain11,
-			RingDomainSize::Domain12,
-			RingDomainSize::Domain16,
-		];
-		ALL.iter().copied().find(|d| d.value() == value).ok_or(())
-	}
-}
-
-impl From<RingDomainSize> for u32 {
-	fn from(value: RingDomainSize) -> Self {
-		value.value()
+		Self::VARIANTS
+			.iter()
+			.copied()
+			.find(|d| d.value() == value)
+			.ok_or(())
 	}
 }
 
 impl RingDomainSize {
+	/// All variants, in declaration order. Reuse this instead of redefining
+	/// the array at call sites.
+	pub(crate) const VARIANTS: [Self; 3] = [Self::Domain11, Self::Domain12, Self::Domain16];
+
 	/// Returns the domain size as a power of 2.
 	pub const fn as_power(self) -> u32 {
 		match self {
@@ -557,11 +554,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Proof = BoundedVec<u8, MaxRingVrfSignatureLen<S>>;
 	type Signature = S::SignatureBytes;
 	type StaticChunk = StaticChunk<S>;
-	type Capacity = RingDomainSize;
+	type Config = RingDomainSize;
 
-	fn start_members(capacity: Self::Capacity) -> Self::Intermediate {
+	fn start_members(config: Self::Config) -> Self::Intermediate {
 		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = S::CurveParams::empty_ring_commitment(capacity);
+		let data = S::CurveParams::empty_ring_commitment(config);
 		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
 	}
 
@@ -605,13 +602,13 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn validate_multi_context(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		proof: &Self::Proof,
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<Vec<Alias>, ()> {
-		let verifier_params = S::VerifierCache::get(capacity);
+		let verifier_params = S::VerifierCache::get(config);
 		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
@@ -647,11 +644,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	// 2. maintain a list of caches (one for each verifier key)
 	//    - the loop below needs to build the `verifier` using the appropriate verifier key
 	fn batch_validate(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
 	) -> Result<Vec<Alias>, ()> {
-		let verifier_params = S::VerifierCache::get(capacity);
+		let verifier_params = S::VerifierCache::get(config);
 		let verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let mut aliases = Vec::with_capacity(proofs.len());
@@ -686,7 +683,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 	#[cfg(feature = "prover")]
 	fn open(
-		capacity: Self::Capacity,
+		config: Self::Config,
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, ()> {
@@ -695,11 +692,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.collect::<Result<Vec<_>, _>>()?;
 		let member = PublicKey::<S>::deserialize_canonical(member.as_ref())?;
 		let prover_idx = pks.iter().position(|&m| m == member.0).ok_or(())? as u32;
-		let prover_key = S::ProverCache::get(capacity)
+		let prover_key = S::ProverCache::get(config)
 			.prover_key(&pks)
 			.map_err(|_| ())?;
 		Ok(ProverState {
-			domain_size: capacity.value(),
+			domain_size: config.value(),
 			prover_idx,
 			prover_key,
 		})

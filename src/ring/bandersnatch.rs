@@ -30,15 +30,9 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
 		type P = ark_vrf::ring::RingContext<BandersnatchSha512Ell2>;
-		static D11: Once<P> = Once::new();
-		static D12: Once<P> = Once::new();
-		static D16: Once<P> = Once::new();
-		let init = || make_ring_context(domain_size);
-		match domain_size {
-			RingDomainSize::Domain11 => D11.call_once(init),
-			RingDomainSize::Domain12 => D12.call_once(init),
-			RingDomainSize::Domain16 => D16.call_once(init),
-		}
+		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
+			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
+		CELLS[domain_size as usize].call_once(|| make_ring_context(domain_size))
 	}
 }
 
@@ -55,15 +49,9 @@ impl ProverCache<BandersnatchSha512Ell2> for BandersnatchProverCache {
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
 		type P = ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>;
-		static D11: Once<P> = Once::new();
-		static D12: Once<P> = Once::new();
-		static D16: Once<P> = Once::new();
-		let init = || make_ring_setup(domain_size);
-		match domain_size {
-			RingDomainSize::Domain11 => D11.call_once(init),
-			RingDomainSize::Domain12 => D12.call_once(init),
-			RingDomainSize::Domain16 => D16.call_once(init),
-		}
+		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
+			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
+		CELLS[domain_size as usize].call_once(|| make_ring_setup(domain_size))
 	}
 }
 
@@ -336,14 +324,7 @@ mod builder_tests {
 	fn generate_empty_ring_builders() {
 		use std::io::Write;
 
-		/// All available domain sizes.
-		const ALL: [RingDomainSize; 3] = [
-			RingDomainSize::Domain11,
-			RingDomainSize::Domain12,
-			RingDomainSize::Domain16,
-		];
-
-		for domain_size in ALL {
+		for domain_size in RingDomainSize::VARIANTS {
 			let (builder, builder_params) = start_members_from_params(domain_size);
 
 			let builder_file = format!(
