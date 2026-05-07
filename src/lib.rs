@@ -10,8 +10,8 @@ use core::{fmt::Debug, ops::Range};
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
 
-#[cfg(feature = "testing")]
-pub mod demo;
+#[cfg(feature = "mock")]
+pub mod mock;
 pub mod ring;
 
 /// Trait for capacity types used in ring operations.
