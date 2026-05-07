@@ -38,18 +38,19 @@ pub enum RingDomainSize {
 impl TryFrom<u32> for RingDomainSize {
 	type Error = ();
 	fn try_from(value: u32) -> Result<Self, Self::Error> {
-		const ALL: [RingDomainSize; 3] = [
-			RingDomainSize::Domain11,
-			RingDomainSize::Domain12,
-			RingDomainSize::Domain16,
-		];
-		ALL.iter().copied().find(|d| d.value() == value).ok_or(())
+		Self::VARIANTS
+			.iter()
+			.copied()
+			.find(|d| d.value() == value)
+			.ok_or(())
 	}
 }
 
 impl RingDomainSize {
-	/// Number of variants. Used to size per-domain caches.
-	pub(crate) const COUNT: usize = 3;
+	/// All variants, in declaration order. Reuse this instead of redefining
+	/// the array at call sites.
+	pub(crate) const VARIANTS: [Self; 3] =
+		[Self::Domain11, Self::Domain12, Self::Domain16];
 
 	/// Returns the domain size as a power of 2.
 	pub const fn as_power(self) -> u32 {
@@ -68,15 +69,6 @@ impl RingDomainSize {
 	/// The max ring that can be handled for both sign/verify at this domain size.
 	pub const fn max_ring_size<S: RingSuite>(self) -> usize {
 		ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(self.value() as usize)
-	}
-
-	/// Stable dense index in `[0, COUNT)`. Used to key per-domain caches.
-	pub(crate) const fn index(self) -> usize {
-		match self {
-			RingDomainSize::Domain11 => 0,
-			RingDomainSize::Domain12 => 1,
-			RingDomainSize::Domain16 => 2,
-		}
 	}
 }
 

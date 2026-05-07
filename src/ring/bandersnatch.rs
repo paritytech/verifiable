@@ -6,7 +6,7 @@ use crate::ring::{
 pub use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
 
 #[cfg(feature = "prover")]
-use crate::ring::{ProverCache, make_ring_setup};
+use crate::ring::{make_ring_setup, ProverCache};
 
 /// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
 pub type BandersnatchVrfVerifiable = RingVrfVerifiable<BandersnatchSha512Ell2>;
@@ -30,9 +30,9 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
 		type P = ark_vrf::ring::RingContext<BandersnatchSha512Ell2>;
-		static CELLS: [Once<P>; RingDomainSize::COUNT] =
-			[const { Once::new() }; RingDomainSize::COUNT];
-		CELLS[domain_size.index()].call_once(|| make_ring_context(domain_size))
+		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
+			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
+		CELLS[domain_size as usize].call_once(|| make_ring_context(domain_size))
 	}
 }
 
@@ -49,9 +49,9 @@ impl ProverCache<BandersnatchSha512Ell2> for BandersnatchProverCache {
 	fn get(domain_size: RingDomainSize) -> Self::Handle {
 		use spin::Once;
 		type P = ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>;
-		static CELLS: [Once<P>; RingDomainSize::COUNT] =
-			[const { Once::new() }; RingDomainSize::COUNT];
-		CELLS[domain_size.index()].call_once(|| make_ring_setup(domain_size))
+		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
+			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
+		CELLS[domain_size as usize].call_once(|| make_ring_setup(domain_size))
 	}
 }
 
@@ -85,7 +85,7 @@ mod tests {
 	use ark_vrf::ring::SrsLookup;
 
 	use super::*;
-	use crate::{GenerateVerifiable, ring::ring_signature_size};
+	use crate::{ring::ring_signature_size, GenerateVerifiable};
 
 	// Type aliases for Bandersnatch-specific generic types
 	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
@@ -233,7 +233,7 @@ mod tests {
 
 #[cfg(test)]
 mod builder_tests {
-	use crate::{GenerateVerifiable, ring::ring_verifier_builder_params};
+	use crate::{ring::ring_verifier_builder_params, GenerateVerifiable};
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
@@ -242,7 +242,7 @@ mod builder_tests {
 	use parity_scale_codec::{Decode, Encode};
 
 	use tests::{
-		MembersCommitment, MembersSet, bandersnatch_ring_setup, start_members_from_params,
+		bandersnatch_ring_setup, start_members_from_params, MembersCommitment, MembersSet,
 	};
 
 	/// Macro to generate test functions for all implemented domain sizes.
@@ -324,14 +324,7 @@ mod builder_tests {
 	fn generate_empty_ring_builders() {
 		use std::io::Write;
 
-		/// All available domain sizes.
-		const ALL: [RingDomainSize; 3] = [
-			RingDomainSize::Domain11,
-			RingDomainSize::Domain12,
-			RingDomainSize::Domain16,
-		];
-
-		for domain_size in ALL {
+		for domain_size in RingDomainSize::VARIANTS {
 			let (builder, builder_params) = start_members_from_params(domain_size);
 
 			let builder_file = format!(
@@ -785,10 +778,12 @@ mod builder_tests {
 		let mut wrong_message_items = batch_items.clone();
 		wrong_message_items[2].message = b"tampered message".to_vec();
 
-		assert!(
-			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &wrong_message_items,)
-				.is_err()
-		);
+		assert!(BandersnatchVrfVerifiable::batch_validate(
+			domain_size,
+			&members,
+			&wrong_message_items,
+		)
+		.is_err());
 
 		// Test with a proof from a non-member key.
 		// Generate a new key that is NOT in the ring, create a proof using a ring
@@ -1054,16 +1049,14 @@ mod builder_tests {
 		let proof_malleated: <BandersnatchVrfVerifiable as GenerateVerifiable>::Proof =
 			BoundedVec::try_from(bytes).unwrap();
 
-		assert!(
-			BandersnatchVrfVerifiable::validate(
-				domain_size,
-				&proof_malleated,
-				&members,
-				context,
-				message,
-			)
-			.is_err()
-		);
+		assert!(BandersnatchVrfVerifiable::validate(
+			domain_size,
+			&proof_malleated,
+			&members,
+			context,
+			message,
+		)
+		.is_err());
 
 		// Same check via batch_validate.
 		let batch_items = vec![BatchProofItem {
