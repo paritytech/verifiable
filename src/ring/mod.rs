@@ -5,8 +5,8 @@ pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
-	ring::{RingSuite, Verifier},
 	VrfIo,
+	ring::{RingSuite, Verifier},
 };
 use bounded_collections::{BoundedVec, Get};
 use parity_scale_codec::{Decode, Encode};

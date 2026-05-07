@@ -151,7 +151,10 @@ mod tests {
 			(RingDomainSize::Domain16, 16127),
 		];
 		for (dom_size, exp_ring_size) in DOM_TO_RING_SIZE_MAP {
-			assert_eq!(dom_size.max_ring_size::<BandersnatchSha512Ell2>(), exp_ring_size);
+			assert_eq!(
+				dom_size.max_ring_size::<BandersnatchSha512Ell2>(),
+				exp_ring_size
+			);
 		}
 	}
 
