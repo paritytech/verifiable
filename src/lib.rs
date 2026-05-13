@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use core::{fmt::Debug, ops::Range};
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
+use smallvec::SmallVec;
 
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -23,6 +24,28 @@ pub type Alias = [u8; 32];
 
 /// Entropy supplied for the creation of a secret key.
 pub type Entropy = [u8; 32];
+
+/// Maximum number of contexts the library supports anywhere.
+///
+/// Wire-format hard limit, enforced by deserializers. Must fit in a `u8`
+/// because wire formats encode the count with a single-byte length prefix.
+pub const MAX_CONTEXTS: usize = 16;
+
+const _: () = assert!(MAX_CONTEXTS <= u8::MAX as usize);
+
+/// SmallVec sized for one element per context.
+///
+/// Inline storage covers the common case (up to 3 contexts per proof);
+/// counts in 4..=[`MAX_CONTEXTS`] spill to the heap. Used wherever an
+/// internal collection scales with the number of contexts (aliases, VRF
+/// inputs, VRF outputs).
+pub type ContextVec<T> = SmallVec<[T; 3]>;
+
+/// Collection of aliases returned from the multi-context proof methods.
+///
+/// The single-context default wrappers (`validate`, `create`) rely on this
+/// being inline for `N=1` to avoid heap allocation.
+pub type AliasVec = ContextVec<Alias>;
 
 /// A single item in a batch proof validation request.
 ///
@@ -189,7 +212,7 @@ pub trait GenerateVerifiable {
 		secret: &Self::Secret,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<(Self::Proof, Vec<Alias>), ()>;
+	) -> Result<(Self::Proof, AliasVec), ()>;
 
 	/// Check whether `proof` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
@@ -220,7 +243,7 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> bool {
 		match Self::validate_multi_context(config, proof, members, contexts, message) {
-			Ok(a) => a == aliases,
+			Ok(a) => a.as_slice() == aliases,
 			Err(()) => false,
 		}
 	}
@@ -247,7 +270,7 @@ pub trait GenerateVerifiable {
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<Vec<Alias>, ()>;
+	) -> Result<AliasVec, ()>;
 
 	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
 	/// in order of input.
