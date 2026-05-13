@@ -1,5 +1,4 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(clippy::result_unit_err)]
 
 extern crate alloc;
 
@@ -46,6 +45,32 @@ pub type ContextVec<T> = SmallVec<[T; 3]>;
 /// The single-context default wrappers (`validate`, `create`) rely on this
 /// being inline for `N=1` to avoid heap allocation.
 pub type AliasVec = ContextVec<Alias>;
+
+/// Failure modes for the operations on [`GenerateVerifiable`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+	/// Member bytes don't form a valid public key for this scheme.
+	InvalidMember,
+	/// Member set has reached capacity.
+	SetFull,
+	/// Lookup function failed while pushing members.
+	LookupFailed,
+	/// The prover key is not part of the ring (in `open`).
+	NotInRing,
+	/// The number of contexts exceeds [`MAX_CONTEXTS`].
+	TooManyContexts,
+	/// The proof's encoded output count does not match the supplied contexts.
+	ContextCountMismatch,
+	/// Proof or signature bytes could not be decoded.
+	DecodeError,
+	/// Cryptographic verification failed (invalid proof or signature).
+	VerificationFailed,
+	/// The operation does not support the supplied input.
+	///
+	/// Currently used by `batch_validate` when given a multi-context proof.
+	/// Only single-context proofs are batchable today.
+	Unsupported,
+}
 
 /// A single item in a batch proof validation request.
 ///
@@ -133,17 +158,18 @@ pub trait GenerateVerifiable {
 	/// Introduce a set of new `Member`s into the intermediate value used to build a new `Members`
 	/// value.
 	///
+	/// Duplicate members are accepted; the backend does not deduplicate.
+	///
 	/// An error is returned if at least one member failed to be pushed. This happens in those
 	/// situations:
 	/// * the maximum capacity has already been reached
-	/// * the member is already part of the set
 	/// * the member is invalid (can be checked with `is_member_valid`)
 	/// * the lookup function is invalid
 	fn push_members(
 		intermediate: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
 		lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
-	) -> Result<(), ()>;
+	) -> Result<(), Error>;
 
 	/// Consume the `intermediate` value to create a new `Members` value.
 	fn finish_members(inter: Self::Intermediate) -> Self::Members;
@@ -172,7 +198,7 @@ pub trait GenerateVerifiable {
 		config: Self::Config,
 		member: &Self::Member,
 		members_iter: impl Iterator<Item = Self::Member>,
-	) -> Result<Self::Commitment, ()>;
+	) -> Result<Self::Commitment, Error>;
 
 	/// Create a proof of membership with the `commitment` using the given `secret` of the member
 	/// of the `commitment`.
@@ -195,7 +221,7 @@ pub trait GenerateVerifiable {
 		secret: &Self::Secret,
 		context: &[u8],
 		message: &[u8],
-	) -> Result<(Self::Proof, Alias), ()> {
+	) -> Result<(Self::Proof, Alias), Error> {
 		let (proof, aliases) = Self::create_multi_context(commitment, secret, &[context], message)?;
 		Ok((proof, aliases[0]))
 	}
@@ -212,7 +238,7 @@ pub trait GenerateVerifiable {
 		secret: &Self::Secret,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<(Self::Proof, AliasVec), ()>;
+	) -> Result<(Self::Proof, AliasVec), Error>;
 
 	/// Check whether `proof` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
@@ -227,7 +253,7 @@ pub trait GenerateVerifiable {
 	) -> bool {
 		match Self::validate(config, proof, members, context, message) {
 			Ok(a) => &a == alias,
-			Err(()) => false,
+			Err(_) => false,
 		}
 	}
 
@@ -244,12 +270,12 @@ pub trait GenerateVerifiable {
 	) -> bool {
 		match Self::validate_multi_context(config, proof, members, contexts, message) {
 			Ok(a) => a.as_slice() == aliases,
-			Err(()) => false,
+			Err(_) => false,
 		}
 	}
 
 	/// Generate the alias a `secret` would have in a given `context`.
-	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()>;
+	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, Error>;
 
 	/// Like `is_valid`, but `alias` is returned, not provided.
 	fn validate(
@@ -258,7 +284,7 @@ pub trait GenerateVerifiable {
 		members: &Self::Members,
 		context: &[u8],
 		message: &[u8],
-	) -> Result<Alias, ()> {
+	) -> Result<Alias, Error> {
 		let result = Self::validate_multi_context(config, proof, members, &[context], message)?;
 		Ok(result[0])
 	}
@@ -270,7 +296,7 @@ pub trait GenerateVerifiable {
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<AliasVec, ()>;
+	) -> Result<AliasVec, Error>;
 
 	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
 	/// in order of input.
@@ -281,7 +307,7 @@ pub trait GenerateVerifiable {
 		config: Self::Config,
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
-	) -> Result<Vec<Alias>, ()> {
+	) -> Result<Vec<Alias>, Error> {
 		proofs
 			.iter()
 			.map(|item| Self::validate(config, &item.proof, members, &item.context, &item.message))
@@ -292,7 +318,7 @@ pub trait GenerateVerifiable {
 	fn is_member_valid(member: &Self::Member) -> bool;
 
 	/// Make a non-anonymous signature of `message` using `secret`.
-	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()>;
+	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, Error>;
 
 	/// Verify a non-anonymous signature of `message` against the given `member`'s public key.
 	fn verify_signature(signature: &Self::Signature, message: &[u8], member: &Self::Member)
@@ -321,7 +347,7 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 		members: impl Iterator<Item = Gen::Member>,
 		context: &[u8],
 		message: Vec<u8>,
-	) -> Result<Self, ()>
+	) -> Result<Self, Error>
 	where
 		Gen::Member: 'a,
 	{
@@ -357,7 +383,7 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	) -> Result<(Alias, Vec<u8>), Self> {
 		match Gen::validate(config, &self.proof, members, context, &self.message) {
 			Ok(alias) => Ok((alias, self.message)),
-			Err(()) => Err(self),
+			Err(_) => Err(self),
 		}
 	}
 	/// Check whether this receipt contains a valid proof for the given `members` and `context`.
