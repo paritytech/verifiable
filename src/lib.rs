@@ -322,7 +322,7 @@ pub trait GenerateVerifiable {
 
 	/// Verify a non-anonymous signature of `message` against the given `member`'s public key.
 	fn verify_signature(signature: &Self::Signature, message: &[u8], member: &Self::Member)
-		-> bool;
+	-> bool;
 }
 
 /// Convenience wrapper bundling a proof with its associated alias and message.
