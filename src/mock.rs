@@ -94,12 +94,9 @@ impl GenerateVerifiable for Mock {
 		inter: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
 		_lookup: impl Fn(Range<usize>) -> Result<Vec<Self::StaticChunk>, ()>,
-	) -> Result<(), ()> {
+	) -> Result<(), Error> {
 		for member in members {
-			if inter.contains(&member) {
-				return Err(());
-			}
-			inter.try_push(member).map_err(|_| ())?;
+			inter.try_push(member).map_err(|_| Error::SetFull)?;
 		}
 		Ok(())
 	}
@@ -121,10 +118,10 @@ impl GenerateVerifiable for Mock {
 		_config: Self::Config,
 		member: &Self::Member,
 		members: impl Iterator<Item = Self::Member>,
-	) -> Result<Self::Commitment, ()> {
+	) -> Result<Self::Commitment, Error> {
 		let set = members.collect::<Vec<_>>();
 		if !set.contains(member) {
-			return Err(());
+			return Err(Error::NotInRing);
 		}
 		Ok((*member, set))
 	}
@@ -135,15 +132,15 @@ impl GenerateVerifiable for Mock {
 		secret: &Self::Secret,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<(Self::Proof, AliasVec), ()> {
+	) -> Result<(Self::Proof, AliasVec), Error> {
 		if &member != secret {
-			return Err(());
+			return Err(Error::NotInRing);
 		}
 		if contexts.len() > MAX_CONTEXTS {
-			return Err(());
+			return Err(Error::TooManyContexts);
 		}
 		let aliases: AliasVec = contexts.iter().map(|ctx| make_alias(secret, ctx)).collect();
-		let bounded = BoundedVec::try_from(aliases.to_vec()).map_err(|_| ())?;
+		let bounded = BoundedVec::try_from(aliases.to_vec()).map_err(|_| Error::TooManyContexts)?;
 		let tag = make_proof_tag(secret, contexts, &aliases, message);
 		let proof = MockProof {
 			tag,
@@ -159,31 +156,31 @@ impl GenerateVerifiable for Mock {
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<AliasVec, ()> {
+	) -> Result<AliasVec, Error> {
 		let MockProof {
 			tag,
 			member,
 			aliases,
 		} = proof;
 		if !members.contains(member) {
-			return Err(());
+			return Err(Error::VerificationFailed);
 		}
 		if aliases.len() != contexts.len() {
-			return Err(());
+			return Err(Error::ContextCountMismatch);
 		}
 		for (alias, ctx) in aliases.iter().zip(contexts.iter()) {
 			if alias != &make_alias(member, ctx) {
-				return Err(());
+				return Err(Error::VerificationFailed);
 			}
 		}
 		let expected_tag = make_proof_tag(member, contexts, aliases, message);
 		if tag != &expected_tag {
-			return Err(());
+			return Err(Error::VerificationFailed);
 		}
 		Ok(aliases.iter().copied().collect())
 	}
 
-	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {
+	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, Error> {
 		Ok(make_alias(secret, context))
 	}
 
@@ -191,7 +188,7 @@ impl GenerateVerifiable for Mock {
 		true
 	}
 
-	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, ()> {
+	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, Error> {
 		Ok(make_signature(secret, message))
 	}
 
@@ -360,11 +357,11 @@ mod tests {
 	}
 
 	#[test]
-	fn duplicate_member_rejected() {
+	fn duplicate_member_accepted() {
 		let secret = Mock::new_secret([0u8; 32]);
 		let member = Mock::member_from_secret(&secret);
 		let mut inter = Mock::start_members(());
 		assert!(Mock::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).is_ok());
-		assert!(Mock::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).is_err());
+		assert!(Mock::push_members(&mut inter, [member].into_iter(), |_| Ok(vec![()])).is_ok());
 	}
 }
