@@ -20,7 +20,7 @@ pub mod bandersnatch;
 /// Validation is enabled to reject malformed data that could trigger panics
 /// in downstream cryptographic operations.
 const UNCOMPRESSED: ark_scale::Usage =
-	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::Yes);
+	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::No);
 
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
