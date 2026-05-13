@@ -497,7 +497,7 @@ impl<S: RingSuiteExt> CanonicalDeserialize for RingVrfOutputs<S> {
 					ark_serialize::Validate::No,
 				)?);
 			}
-			if let ark_serialize::Validate::Yes = validate {
+			if matches!(validate, ark_serialize::Validate::Yes) {
 				ark_vrf::Output::<S>::batch_check(outputs.iter())?;
 			}
 			Ok(Self::Multi(outputs))

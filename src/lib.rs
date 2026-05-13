@@ -2,7 +2,6 @@
 #![allow(clippy::result_unit_err)]
 
 extern crate alloc;
-extern crate core;
 
 use alloc::vec::Vec;
 
@@ -46,11 +45,10 @@ pub struct BatchProofItem<Proof> {
 /// contexts without exposing the underlying member who is proving it and giving an unlinkable
 /// deterministic pseudonymic "alias" under each context.
 ///
-/// A value of this type represents a proof. It can be created using the `Self::create` function
-/// from the `Self::Secret` value associated with a `Self::Member` value who exists within a set of
-/// members identified with a `Self::Members` value. It can later be validated with the
-/// `Self::is_valid` function using `self` together with the same information used to create it
-/// (except the secret, of course!).
+/// A `Self::Proof` is created using the `Self::create` function from the `Self::Secret` value
+/// associated with a `Self::Member` value who exists within a set of members identified with a
+/// `Self::Members` value. The proof can later be validated with the `Self::is_valid` function
+/// using the same information used to create it (except the secret, of course!).
 ///
 /// A convenience [`Receipt`] type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
@@ -157,7 +155,7 @@ pub trait GenerateVerifiable {
 	/// of the `commitment`.
 	///
 	/// The proof will be specific to a given `context` (which determines the resultant `Alias` of
-	/// the member in a way unlinkable to the member's original identifiaction and aliases in any
+	/// the member in a way unlinkable to the member's original identification and aliases in any
 	/// other contexts) together with a provided `message` which entirely at the choice of the
 	/// individual.
 	///
@@ -193,7 +191,7 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> Result<(Self::Proof, Vec<Alias>), ()>;
 
-	/// Check whether `self` is a valid proof of membership in `members` in the given `context`;
+	/// Check whether `proof` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
 	/// that they elected to opine `message`.
 	fn is_valid(
