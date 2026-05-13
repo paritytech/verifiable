@@ -20,7 +20,6 @@ use bounded_collections::{BoundedVec, ConstU32};
 use sha2::{Digest, Sha256};
 
 pub const MAX_MEMBERS: u32 = 1024;
-pub const MAX_CONTEXTS: u32 = 3;
 
 const TAG_ALIAS: &[u8] = b"verifiable-mock:v1:alias";
 const TAG_SIG: &[u8] = b"verifiable-mock:v1:sig";
@@ -69,7 +68,7 @@ fn make_proof_tag(
 pub struct MockProof {
 	pub tag: [u8; 32],
 	pub member: [u8; 32],
-	pub aliases: BoundedVec<Alias, ConstU32<MAX_CONTEXTS>>,
+	pub aliases: BoundedVec<Alias, ConstU32<{ MAX_CONTEXTS as u32 }>>,
 }
 
 /// Mock [`GenerateVerifiable`] implementation.
@@ -136,15 +135,15 @@ impl GenerateVerifiable for Mock {
 		secret: &Self::Secret,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<(Self::Proof, Vec<Alias>), ()> {
+	) -> Result<(Self::Proof, AliasVec), ()> {
 		if &member != secret {
 			return Err(());
 		}
-		if contexts.len() > MAX_CONTEXTS as usize {
+		if contexts.len() > MAX_CONTEXTS {
 			return Err(());
 		}
-		let aliases: Vec<Alias> = contexts.iter().map(|ctx| make_alias(secret, ctx)).collect();
-		let bounded = BoundedVec::try_from(aliases.clone()).map_err(|_| ())?;
+		let aliases: AliasVec = contexts.iter().map(|ctx| make_alias(secret, ctx)).collect();
+		let bounded = BoundedVec::try_from(aliases.to_vec()).map_err(|_| ())?;
 		let tag = make_proof_tag(secret, contexts, &aliases, message);
 		let proof = MockProof {
 			tag,
@@ -160,7 +159,7 @@ impl GenerateVerifiable for Mock {
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<Vec<Alias>, ()> {
+	) -> Result<AliasVec, ()> {
 		let MockProof {
 			tag,
 			member,
@@ -181,7 +180,7 @@ impl GenerateVerifiable for Mock {
 		if tag != &expected_tag {
 			return Err(());
 		}
-		Ok(aliases.to_vec())
+		Ok(aliases.iter().copied().collect())
 	}
 
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, ()> {

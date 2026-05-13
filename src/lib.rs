@@ -2,13 +2,13 @@
 #![allow(clippy::result_unit_err)]
 
 extern crate alloc;
-extern crate core;
 
 use alloc::vec::Vec;
 
 use core::{fmt::Debug, ops::Range};
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, FullCodec, MaxEncodedLen};
 use scale_info::*;
+use smallvec::SmallVec;
 
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -24,6 +24,28 @@ pub type Alias = [u8; 32];
 
 /// Entropy supplied for the creation of a secret key.
 pub type Entropy = [u8; 32];
+
+/// Maximum number of contexts the library supports anywhere.
+///
+/// Wire-format hard limit, enforced by deserializers. Must fit in a `u8`
+/// because wire formats encode the count with a single-byte length prefix.
+pub const MAX_CONTEXTS: usize = 16;
+
+const _: () = assert!(MAX_CONTEXTS <= u8::MAX as usize);
+
+/// SmallVec sized for one element per context.
+///
+/// Inline storage covers the common case (up to 3 contexts per proof);
+/// counts in 4..=[`MAX_CONTEXTS`] spill to the heap. Used wherever an
+/// internal collection scales with the number of contexts (aliases, VRF
+/// inputs, VRF outputs).
+pub type ContextVec<T> = SmallVec<[T; 3]>;
+
+/// Collection of aliases returned from the multi-context proof methods.
+///
+/// The single-context default wrappers (`validate`, `create`) rely on this
+/// being inline for `N=1` to avoid heap allocation.
+pub type AliasVec = ContextVec<Alias>;
 
 /// A single item in a batch proof validation request.
 ///
@@ -46,11 +68,10 @@ pub struct BatchProofItem<Proof> {
 /// contexts without exposing the underlying member who is proving it and giving an unlinkable
 /// deterministic pseudonymic "alias" under each context.
 ///
-/// A value of this type represents a proof. It can be created using the `Self::create` function
-/// from the `Self::Secret` value associated with a `Self::Member` value who exists within a set of
-/// members identified with a `Self::Members` value. It can later be validated with the
-/// `Self::is_valid` function using `self` together with the same information used to create it
-/// (except the secret, of course!).
+/// A `Self::Proof` is created using the `Self::create` function from the `Self::Secret` value
+/// associated with a `Self::Member` value who exists within a set of members identified with a
+/// `Self::Members` value. The proof can later be validated with the `Self::is_valid` function
+/// using the same information used to create it (except the secret, of course!).
 ///
 /// A convenience [`Receipt`] type is provided for typical use cases which bundles the proof along
 /// with needed witness information describing the message and alias.
@@ -157,7 +178,7 @@ pub trait GenerateVerifiable {
 	/// of the `commitment`.
 	///
 	/// The proof will be specific to a given `context` (which determines the resultant `Alias` of
-	/// the member in a way unlinkable to the member's original identifiaction and aliases in any
+	/// the member in a way unlinkable to the member's original identification and aliases in any
 	/// other contexts) together with a provided `message` which entirely at the choice of the
 	/// individual.
 	///
@@ -191,9 +212,9 @@ pub trait GenerateVerifiable {
 		secret: &Self::Secret,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<(Self::Proof, Vec<Alias>), ()>;
+	) -> Result<(Self::Proof, AliasVec), ()>;
 
-	/// Check whether `self` is a valid proof of membership in `members` in the given `context`;
+	/// Check whether `proof` is a valid proof of membership in `members` in the given `context`;
 	/// if so, ensure that the member is necessarily associated with `alias` in this `context` and
 	/// that they elected to opine `message`.
 	fn is_valid(
@@ -222,7 +243,7 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> bool {
 		match Self::validate_multi_context(config, proof, members, contexts, message) {
-			Ok(a) => a == aliases,
+			Ok(a) => a.as_slice() == aliases,
 			Err(()) => false,
 		}
 	}
@@ -249,7 +270,7 @@ pub trait GenerateVerifiable {
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<Vec<Alias>, ()>;
+	) -> Result<AliasVec, ()>;
 
 	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
 	/// in order of input.

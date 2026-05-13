@@ -239,8 +239,6 @@ pub trait RingSuiteExt: RingSuite + Debug + 'static {
 	const RING_PROOF_SIZE: usize;
 	/// Compressed size of a single `ark_vrf::Output<S>`.
 	const VRF_OUTPUT_SIZE: usize;
-	/// Maximum number of VRF contexts in a multi-context proof.
-	const MAX_VRF_CONTEXTS: u8;
 
 	/// Byte array type for encoded public keys.
 	type PublicKeyBytes: FixedBytes;
@@ -270,7 +268,7 @@ pub struct MaxRingVrfSignatureLen<S: RingSuiteExt>(PhantomData<S>);
 
 impl<S: RingSuiteExt> Get<u32> for MaxRingVrfSignatureLen<S> {
 	fn get() -> u32 {
-		ring_signature_size::<S>(S::MAX_VRF_CONTEXTS) as u32
+		ring_signature_size::<S>(MAX_CONTEXTS as u8) as u32
 	}
 }
 
@@ -424,29 +422,15 @@ impl<S: RingSuiteExt> core::fmt::Debug for ProverState<S> {
 
 /// VRF outputs within a ring signature.
 ///
-/// For the common single-context case, the output is stored inline on the stack.
-/// For multi-context proofs, outputs are heap-allocated.
+/// Holds one output per context. Backed by a [`ContextVec`] — inline for small
+/// counts, heap-allocated only beyond the inline capacity.
 ///
-/// The wire format uses a `u8` length prefix followed by the outputs (no enum
-/// discriminant). On deserialization, length == 1 produces `Single`, length > 1
-/// produces `Multi`.
-enum RingVrfOutputs<S: RingSuiteExt> {
-	Single(ark_vrf::Output<S>),
-	Multi(Vec<ark_vrf::Output<S>>),
-}
-
-impl<S: RingSuiteExt> RingVrfOutputs<S> {
-	fn as_slice(&self) -> &[ark_vrf::Output<S>] {
-		match self {
-			Self::Single(o) => core::slice::from_ref(o),
-			Self::Multi(v) => v.as_slice(),
-		}
-	}
-}
+/// The wire format is a `u8` length prefix followed by the outputs.
+struct RingVrfOutputs<S: RingSuiteExt>(ContextVec<ark_vrf::Output<S>>);
 
 impl<S: RingSuiteExt> ark_serialize::Valid for RingVrfOutputs<S> {
 	fn check(&self) -> Result<(), ark_serialize::SerializationError> {
-		ark_vrf::Output::<S>::batch_check(self.as_slice().iter())
+		ark_vrf::Output::<S>::batch_check(self.0.iter())
 	}
 }
 
@@ -456,7 +440,7 @@ impl<S: RingSuiteExt> CanonicalSerialize for RingVrfOutputs<S> {
 		mut writer: W,
 		compress: ark_serialize::Compress,
 	) -> Result<(), ark_serialize::SerializationError> {
-		let slice = self.as_slice();
+		let slice = self.0.as_slice();
 		(slice.len() as u8).serialize_with_mode(&mut writer, compress)?;
 		for output in slice {
 			output.serialize_with_mode(&mut writer, compress)?;
@@ -465,7 +449,7 @@ impl<S: RingSuiteExt> CanonicalSerialize for RingVrfOutputs<S> {
 	}
 
 	fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
-		let slice = self.as_slice();
+		let slice = self.0.as_slice();
 		let item_size = slice
 			.iter()
 			.next()
@@ -481,27 +465,21 @@ impl<S: RingSuiteExt> CanonicalDeserialize for RingVrfOutputs<S> {
 		validate: ark_serialize::Validate,
 	) -> Result<Self, ark_serialize::SerializationError> {
 		let len = u8::deserialize_with_mode(&mut reader, compress, validate)?;
-		if len > S::MAX_VRF_CONTEXTS {
+		if len as usize > MAX_CONTEXTS {
 			return Err(ark_serialize::SerializationError::InvalidData);
 		}
-		if len == 1 {
-			let output =
-				ark_vrf::Output::<S>::deserialize_with_mode(&mut reader, compress, validate)?;
-			Ok(Self::Single(output))
-		} else {
-			let mut outputs = Vec::with_capacity(len as usize);
-			for _ in 0..len {
-				outputs.push(ark_vrf::Output::<S>::deserialize_with_mode(
-					&mut reader,
-					compress,
-					ark_serialize::Validate::No,
-				)?);
-			}
-			if let ark_serialize::Validate::Yes = validate {
-				ark_vrf::Output::<S>::batch_check(outputs.iter())?;
-			}
-			Ok(Self::Multi(outputs))
+		let mut outputs = ContextVec::with_capacity(len as usize);
+		for _ in 0..len {
+			outputs.push(ark_vrf::Output::<S>::deserialize_with_mode(
+				&mut reader,
+				compress,
+				ark_serialize::Validate::No,
+			)?);
 		}
+		if matches!(validate, ark_serialize::Validate::Yes) {
+			ark_vrf::Output::<S>::batch_check(outputs.iter())?;
+		}
+		Ok(Self(outputs))
 	}
 }
 
@@ -607,18 +585,18 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		members: &Self::Members,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<Vec<Alias>, ()> {
+	) -> Result<AliasVec, ()> {
 		let verifier_params = S::VerifierCache::get(config);
 		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
 
-		let outputs = signature.outputs.as_slice();
+		let outputs = signature.outputs.0.as_slice();
 		if contexts.len() != outputs.len() {
 			return Err(());
 		}
 
-		let (ios, aliases): (Vec<_>, Vec<_>) = contexts
+		let (ios, aliases): (ContextVec<_>, AliasVec) = contexts
 			.iter()
 			.zip(outputs.iter().copied())
 			.map(|(ctx, output)| {
@@ -663,10 +641,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 			let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
 
-			let output = match signature.outputs {
-				RingVrfOutputs::Single(o) => o,
-				_ => return Err(()),
-			};
+			let outputs = signature.outputs.0.as_slice();
+			if outputs.len() != 1 {
+				return Err(());
+			}
+			let output = outputs[0];
 
 			aliases.push(make_alias(&output));
 
@@ -708,8 +687,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		secret: &Self::Secret,
 		contexts: &[&[u8]],
 		message: &[u8],
-	) -> Result<(Self::Proof, Vec<Alias>), ()> {
+	) -> Result<(Self::Proof, AliasVec), ()> {
 		use ark_vrf::ring::Prover;
+		if contexts.len() > MAX_CONTEXTS {
+			return Err(());
+		}
 		let domain_size = RingDomainSize::try_from(commitment.domain_size).map_err(|_| ())?;
 		let prover_params = S::ProverCache::get(domain_size);
 		if commitment.prover_idx >= prover_params.max_ring_size() as u32 {
@@ -719,7 +701,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let ring_prover =
 			prover_params.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
 
-		let (ios, aliases, outputs): (Vec<_>, Vec<_>, Vec<_>) = contexts
+		let (ios, aliases, outputs): (ContextVec<_>, AliasVec, ContextVec<_>) = contexts
 			.iter()
 			.map(|ctx| {
 				let input_msg = [S::VRF_INPUT_DOMAIN, ctx].concat();
@@ -738,12 +720,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 		let proof = secret.prove(ios, message, &ring_prover);
 
-		let outputs = if outputs.len() == 1 {
-			RingVrfOutputs::Single(outputs.into_iter().next().unwrap())
-		} else {
-			RingVrfOutputs::Multi(outputs)
+		let signature = RingVrfSignature::<S> {
+			outputs: RingVrfOutputs(outputs),
+			proof,
 		};
-		let signature = RingVrfSignature::<S> { outputs, proof };
 
 		let mut buf = vec![];
 		signature.serialize_compressed(&mut buf).map_err(|_| ())?;
