@@ -189,10 +189,8 @@ pub trait GenerateVerifiable {
 	/// counterpart operation `create` does not utilize this data. It does require knowledge of the
 	/// `Secret` for `member` and as such is practical to conduct on an offline/air-gapped device.
 	///
-	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
-	///
-	/// **WARNING**: This function may panic if called from on-chain or an environment not
-	/// implementing the functionality.
+	/// Requires the `prover` feature. The prover paths are heavy and intended for
+	/// off-chain use (wallets, signing services), not for runtime execution.
 	#[cfg(feature = "prover")]
 	fn open(
 		config: Self::Config,
@@ -211,10 +209,8 @@ pub trait GenerateVerifiable {
 	/// - `context`: The context under which membership is proven. Proofs over different `[u8]`s
 	///   are unlinkable.
 	///
-	/// NOTE: We never expect to use this code on-chain; it should be used only in the wallet.
-	///
-	/// **WARNING**: This function may panic if called from on-chain or an environment not
-	/// implementing the functionality.
+	/// Requires the `prover` feature. Intended for off-chain use (wallets, signing
+	/// services), not for runtime execution.
 	#[cfg(feature = "prover")]
 	fn create(
 		commitment: Self::Commitment,
@@ -373,8 +369,9 @@ impl<Gen: GenerateVerifiable> Receipt<Gen> {
 	}
 	/// Verify the receipt against the given `members` set and `context`.
 	///
-	/// On success, returns the validated alias and message. On failure, returns
-	/// the receipt back so it can be inspected or retried.
+	/// On success, returns the validated alias and message. On failure, the
+	/// receipt is returned in `Err` so the caller can retry verification against
+	/// a different `members` set or `context` without rebuilding it.
 	pub fn verify(
 		self,
 		config: Gen::Config,
