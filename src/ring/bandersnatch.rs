@@ -405,16 +405,7 @@ mod builder_tests {
 		let mut inter2 = inter1.clone();
 		let builder_params = ring_verifier_builder_params::<BandersnatchSha512Ell2>(domain_size);
 
-		let get_many = |range| {
-			(&builder_params)
-				.lookup(range)
-				.map(|v| {
-					v.into_iter()
-						.map(crate::ring::StaticChunk)
-						.collect::<Vec<_>>()
-				})
-				.ok_or(())
-		};
+		let get_many = chunk_lookup(&builder_params);
 
 		BandersnatchVrfVerifiable::push_members(
 			&mut inter1,
@@ -448,16 +439,7 @@ mod builder_tests {
 		// Second set is everyone all at once but with a starting root constructed from params.
 		let (mut inter2, builder_params) = start_members_from_params(domain_size);
 
-		let get_many = |range| {
-			(&builder_params)
-				.lookup(range)
-				.map(|v| {
-					v.into_iter()
-						.map(crate::ring::StaticChunk)
-						.collect::<Vec<_>>()
-				})
-				.ok_or(())
-		};
+		let get_many = chunk_lookup(&builder_params);
 
 		// Third set is everyone added one by one.
 		let mut inter3 = BandersnatchVrfVerifiable::start_members(domain_size);
@@ -544,16 +526,7 @@ mod builder_tests {
 		// `builder_params` can be serialized/deserialized to be loaded when required
 		let (_, builder_params) = start_members_from_params(domain_size);
 
-		let get_many = |range| {
-			(&builder_params)
-				.lookup(range)
-				.map(|v| {
-					v.into_iter()
-						.map(crate::ring::StaticChunk)
-						.collect::<Vec<_>>()
-				})
-				.ok_or(())
-		};
+		let get_many = chunk_lookup(&builder_params);
 
 		let start = Instant::now();
 		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
@@ -638,16 +611,7 @@ mod builder_tests {
 
 		// Build the ring commitment for verification
 		let (_, builder_params) = start_members_from_params(domain_size);
-		let get_many = |range| {
-			(&builder_params)
-				.lookup(range)
-				.map(|v| {
-					v.into_iter()
-						.map(crate::ring::StaticChunk)
-						.collect::<Vec<_>>()
-				})
-				.ok_or(())
-		};
+		let get_many = chunk_lookup(&builder_params);
 		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
 		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().copied(), get_many)
 			.unwrap();
@@ -744,16 +708,7 @@ mod builder_tests {
 
 		// Build the ring commitment for verification
 		let (_, builder_params) = start_members_from_params(domain_size);
-		let get_many = |range| {
-			(&builder_params)
-				.lookup(range)
-				.map(|v| {
-					v.into_iter()
-						.map(crate::ring::StaticChunk)
-						.collect::<Vec<_>>()
-				})
-				.ok_or(())
-		};
+		let get_many = chunk_lookup(&builder_params);
 		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
 		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys.iter().copied(), get_many)
 			.unwrap();
@@ -865,16 +820,7 @@ mod builder_tests {
 		// `builder_params` can be serialized/deserialized to be loaded when required
 		let (_, builder_params) = start_members_from_params(domain_size);
 
-		let get_many = |range| {
-			(&builder_params)
-				.lookup(range)
-				.map(|v| {
-					v.into_iter()
-						.map(crate::ring::StaticChunk)
-						.collect::<Vec<_>>()
-				})
-				.ok_or(())
-		};
+		let get_many = chunk_lookup(&builder_params);
 
 		let mut inter1 = BandersnatchVrfVerifiable::start_members(domain_size);
 		let start = Instant::now();
@@ -1068,21 +1014,27 @@ mod builder_tests {
 		);
 	}
 
+	fn chunk_lookup(
+		builder_params: &ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>,
+	) -> impl Fn(
+		core::ops::Range<usize>,
+	) -> Result<Vec<crate::ring::StaticChunk<BandersnatchSha512Ell2>>, ()>
+	+ Copy
+	+ '_ {
+		move |range| {
+			builder_params
+				.lookup(range)
+				.map(|v| v.into_iter().map(crate::ring::StaticChunk).collect())
+				.ok_or(())
+		}
+	}
+
 	fn build_members(
 		member_keys: impl Iterator<Item = <BandersnatchVrfVerifiable as GenerateVerifiable>::Member>,
 		domain_size: RingDomainSize,
 	) -> <BandersnatchVrfVerifiable as GenerateVerifiable>::Members {
 		let (_, builder_params) = start_members_from_params(domain_size);
-		let get_many = |range| {
-			(&builder_params)
-				.lookup(range)
-				.map(|v| {
-					v.into_iter()
-						.map(crate::ring::StaticChunk)
-						.collect::<Vec<_>>()
-				})
-				.ok_or(())
-		};
+		let get_many = chunk_lookup(&builder_params);
 		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
 		BandersnatchVrfVerifiable::push_members(&mut inter, member_keys, get_many).unwrap();
 		BandersnatchVrfVerifiable::finish_members(inter)
