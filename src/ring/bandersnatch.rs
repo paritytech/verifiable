@@ -948,12 +948,12 @@ mod builder_tests {
 		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
 	}
 
-	// The `UncheckedDecode::unchecked_decode` entry point shares the wire format
+	// The `DecodeUnchecked::decode_unchecked` entry point shares the wire format
 	// with the validating `Decode::decode` — this is what makes routing a
-	// storage field through `unchecked_decode` a zero-migration change.
+	// storage field through `decode_unchecked` a zero-migration change.
 	#[test]
-	fn unchecked_decode_reads_same_bytes() {
-		use crate::ring::UncheckedDecode;
+	fn decode_unchecked_reads_same_bytes() {
+		use crate::ring::DecodeUnchecked;
 
 		let domain_size = RingDomainSize::Domain11;
 		let _ = bandersnatch_ring_setup(domain_size);
@@ -962,16 +962,16 @@ mod builder_tests {
 		let commitment = BandersnatchVrfVerifiable::finish_members(members_set);
 
 		let bytes = commitment.encode();
-		let decoded = MembersCommitment::unchecked_decode(&mut &bytes[..]).expect("decode ok");
+		let decoded = MembersCommitment::decode_unchecked(&mut &bytes[..]).expect("decode ok");
 		assert_eq!(decoded.encode(), bytes);
 	}
 
-	// `unchecked_decode` must accept inputs that the validating decode path
+	// `decode_unchecked` must accept inputs that the validating decode path
 	// rejects. Pair this with `decode_bogus_commitment_fails` — without that
 	// test the property below would still hold trivially.
 	#[test]
-	fn unchecked_decode_skips_validation() {
-		use crate::ring::UncheckedDecode;
+	fn decode_unchecked_skips_validation() {
+		use crate::ring::DecodeUnchecked;
 
 		let zero_bytes = vec![0u8; BandersnatchSha512Ell2::MEMBERS_COMMITMENT_SIZE];
 
@@ -979,7 +979,7 @@ mod builder_tests {
 		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
 
 		// Unchecked path accepts the same bytes.
-		assert!(MembersCommitment::unchecked_decode(&mut &zero_bytes[..]).is_ok());
+		assert!(MembersCommitment::decode_unchecked(&mut &zero_bytes[..]).is_ok());
 	}
 
 	// A proof with trailing garbage bytes must not be accepted, otherwise the same

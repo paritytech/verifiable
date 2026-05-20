@@ -23,7 +23,7 @@ const UNCOMPRESSED: ark_scale::Usage =
 	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::Yes);
 
 /// Uncompressed encoding mode without curve-point validation. Used by the
-/// [`UncheckedDecode`] entry points for decoding values from trusted sources
+/// [`DecodeUnchecked`] entry points for decoding values from trusted sources
 /// where the validation cost has already been paid on the way in.
 const UNCOMPRESSED_UNCHECKED: ark_scale::Usage =
 	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::No);
@@ -37,15 +37,15 @@ const UNCOMPRESSED_UNCHECKED: ark_scale::Usage =
 /// value that was already validated on the way in repeats that work for
 /// nothing.
 ///
-/// Implementors expose a parallel `unchecked_decode` entry point that reads
+/// Implementors expose a parallel `decode_unchecked` entry point that reads
 /// the exact same bytes without revalidating. The supertrait `Decode`
 /// expresses that the two paths share the same wire format; only the
 /// validation policy differs.
 ///
 /// Use only for values that were validated at their ingress point. Do not
 /// call on data that arrives from an untrusted source.
-pub trait UncheckedDecode: Sized + Decode {
-	fn unchecked_decode<I: ark_scale::scale::Input>(
+pub trait DecodeUnchecked: Sized + Decode {
+	fn decode_unchecked<I: ark_scale::scale::Input>(
 		input: &mut I,
 	) -> Result<Self, ark_scale::scale::Error>;
 }
@@ -384,8 +384,8 @@ macro_rules! impl_common_traits {
 
 		impl<S: $bound> DecodeWithMemTracking for $type_name<S> {}
 
-		impl<S: $bound> UncheckedDecode for $type_name<S> {
-			fn unchecked_decode<I: ark_scale::scale::Input>(
+		impl<S: $bound> DecodeUnchecked for $type_name<S> {
+			fn decode_unchecked<I: ark_scale::scale::Input>(
 				input: &mut I,
 			) -> Result<Self, ark_scale::scale::Error> {
 				let a: ark_scale::ArkScale<Self, { UNCOMPRESSED_UNCHECKED }> =
