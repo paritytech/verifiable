@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`UncheckedDecode` trait for trusted-source SCALE decoding.** Exposes
+  an `unchecked_decode` entry point on the four ring types (`MembersSet`,
+  `MembersCommitment`, `StaticChunk`, `ProverState`) that reads the same
+  wire format as the default SCALE `Decode` impl but skips the arkworks
+  curve-point validation.
+
 ## [0.3.0]
 
 ### Breaking Changes

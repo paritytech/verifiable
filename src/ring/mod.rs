@@ -22,6 +22,34 @@ pub mod bandersnatch;
 const UNCOMPRESSED: ark_scale::Usage =
 	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::Yes);
 
+/// Uncompressed encoding mode without curve-point validation. Used by the
+/// [`UncheckedDecode`] entry points for decoding values from trusted sources
+/// where the validation cost has already been paid on the way in.
+const UNCOMPRESSED_UNCHECKED: ark_scale::Usage =
+	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::No);
+
+/// SCALE decoding entry points that skip arkworks curve-point validation.
+///
+/// The default `Decode` impls for the ring types ([`MembersSet`],
+/// [`MembersCommitment`], [`StaticChunk`], [`ProverState`]) validate every
+/// curve point — the right behaviour at trust boundaries (extrinsic
+/// arguments, XCM payloads, anything crossing an untrusted edge). Reading a
+/// value that was already validated on the way in repeats that work for
+/// nothing.
+///
+/// Implementors expose a parallel `unchecked_decode` entry point that reads
+/// the exact same bytes without revalidating. The supertrait `Decode`
+/// expresses that the two paths share the same wire format; only the
+/// validation policy differs.
+///
+/// Use only for values that were validated at their ingress point. Do not
+/// call on data that arrives from an untrusted source.
+pub trait UncheckedDecode: Sized + Decode {
+	fn unchecked_decode<I: ark_scale::scale::Input>(
+		input: &mut I,
+	) -> Result<Self, ark_scale::scale::Error>;
+}
+
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
 /// This determines the maximum ring size that can be supported for a ring suite.
@@ -355,6 +383,18 @@ macro_rules! impl_common_traits {
 		impl<S: $bound> core::cmp::Eq for $type_name<S> {}
 
 		impl<S: $bound> DecodeWithMemTracking for $type_name<S> {}
+
+		impl<S: $bound> UncheckedDecode for $type_name<S> {
+			fn unchecked_decode<I: ark_scale::scale::Input>(
+				input: &mut I,
+			) -> Result<Self, ark_scale::scale::Error> {
+				let a: ark_scale::ArkScale<Self, { UNCOMPRESSED_UNCHECKED }> =
+					<ark_scale::ArkScale<Self, { UNCOMPRESSED_UNCHECKED }> as ark_scale::scale::Decode>::decode(
+						input,
+					)?;
+				Ok(a.0)
+			}
+		}
 	};
 }
 
