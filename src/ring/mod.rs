@@ -28,27 +28,7 @@ const UNCOMPRESSED: ark_scale::Usage =
 const UNCOMPRESSED_UNCHECKED: ark_scale::Usage =
 	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::No);
 
-/// SCALE decoding entry points that skip arkworks curve-point validation.
-///
-/// The default `Decode` impls for the ring types ([`MembersSet`],
-/// [`MembersCommitment`], [`StaticChunk`], [`ProverState`]) validate every
-/// curve point — the right behaviour at trust boundaries (extrinsic
-/// arguments, XCM payloads, anything crossing an untrusted edge). Reading a
-/// value that was already validated on the way in repeats that work for
-/// nothing.
-///
-/// Implementors expose a parallel `decode_unchecked` entry point that reads
-/// the exact same bytes without revalidating. The supertrait `Decode`
-/// expresses that the two paths share the same wire format; only the
-/// validation policy differs.
-///
-/// Use only for values that were validated at their ingress point. Do not
-/// call on data that arrives from an untrusted source.
-pub trait DecodeUnchecked: Sized + Decode {
-	fn decode_unchecked<I: ark_scale::scale::Input>(
-		input: &mut I,
-	) -> Result<Self, ark_scale::scale::Error>;
-}
+pub use crate::DecodeUnchecked;
 
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
