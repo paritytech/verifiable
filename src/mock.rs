@@ -89,7 +89,6 @@ impl<T, N: Get<u32>> TryFrom<Vec<T>> for MockMembers<T, N> {
 	}
 }
 
-
 const TAG_ALIAS: &[u8] = b"verifiable-mock:v1:alias";
 const TAG_SIG: &[u8] = b"verifiable-mock:v1:sig";
 const TAG_PROOF: &[u8] = b"verifiable-mock:v1:proof";
