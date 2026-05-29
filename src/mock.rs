@@ -16,10 +16,78 @@
 //! - Set membership is checked by linear scan, not zero-knowledge.
 
 use super::*;
-use bounded_collections::{BoundedVec, ConstU32};
+use bounded_collections::{BoundedVec, ConstU32, Get};
+use core::ops::{Deref, DerefMut};
 use sha2::{Digest, Sha256};
 
 pub const MAX_MEMBERS: u32 = 1024;
+
+/// Generic mock-side ring members container.
+///
+/// Newtype around `BoundedVec<T, N>` carrying a default-body
+/// [`DecodeUnchecked`] impl (no curve content to skip-validate). Used by
+/// [`Mock`] itself and reusable by downstream test crypto impls without
+/// local duplication.
+///
+/// The inner field is `pub` for ergonomic construction; `Deref` /
+/// `DerefMut` expose `BoundedVec`'s API directly so call sites (`iter`,
+/// `contains`, `try_push`, ...) work unchanged. Impls are hand-written
+/// rather than derived so they bound only on `T`; the `N` parameter is a
+/// `Get<u32>` marker, not a value type.
+#[derive(Encode, Decode, DecodeWithMemTracking, MaxEncodedLen, TypeInfo)]
+#[scale_info(skip_type_params(N))]
+pub struct MockMembers<T, N: Get<u32> = ConstU32<MAX_MEMBERS>>(pub BoundedVec<T, N>);
+
+impl<T: Decode, N: Get<u32>> DecodeUnchecked for MockMembers<T, N> {}
+
+// `Mock`'s `StaticChunk = ()` — no curve content to skip-validate.
+impl DecodeUnchecked for () {}
+
+impl<T: Clone, N: Get<u32>> Clone for MockMembers<T, N> {
+	fn clone(&self) -> Self {
+		Self(self.0.clone())
+	}
+}
+
+impl<T: core::fmt::Debug, N: Get<u32>> core::fmt::Debug for MockMembers<T, N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+		f.debug_tuple("MockMembers").field(&self.0).finish()
+	}
+}
+
+impl<T, N: Get<u32>> Default for MockMembers<T, N> {
+	fn default() -> Self {
+		Self(BoundedVec::new())
+	}
+}
+
+impl<T: PartialEq, N: Get<u32>> PartialEq for MockMembers<T, N> {
+	fn eq(&self, other: &Self) -> bool {
+		self.0 == other.0
+	}
+}
+
+impl<T: Eq, N: Get<u32>> Eq for MockMembers<T, N> {}
+
+impl<T, N: Get<u32>> Deref for MockMembers<T, N> {
+	type Target = BoundedVec<T, N>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl<T, N: Get<u32>> DerefMut for MockMembers<T, N> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+
+impl<T, N: Get<u32>> TryFrom<Vec<T>> for MockMembers<T, N> {
+	type Error = ();
+	fn try_from(v: Vec<T>) -> Result<Self, Self::Error> {
+		BoundedVec::try_from(v).map(Self).map_err(|_| ())
+	}
+}
 
 const TAG_ALIAS: &[u8] = b"verifiable-mock:v1:alias";
 const TAG_SIG: &[u8] = b"verifiable-mock:v1:sig";
@@ -76,8 +144,8 @@ pub struct MockProof {
 pub struct Mock;
 
 impl GenerateVerifiable for Mock {
-	type Members = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
-	type Intermediate = BoundedVec<Self::Member, ConstU32<MAX_MEMBERS>>;
+	type Members = MockMembers<Self::Member>;
+	type Intermediate = MockMembers<Self::Member>;
 	type Member = [u8; 32];
 	type Secret = [u8; 32];
 	type Commitment = (Self::Member, Vec<Self::Member>);
@@ -87,7 +155,7 @@ impl GenerateVerifiable for Mock {
 	type Config = ();
 
 	fn start_members(_config: Self::Config) -> Self::Intermediate {
-		BoundedVec::new()
+		MockMembers::default()
 	}
 
 	fn push_members(

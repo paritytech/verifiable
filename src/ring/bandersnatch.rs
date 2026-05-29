@@ -948,6 +948,40 @@ mod builder_tests {
 		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
 	}
 
+	// The `DecodeUnchecked::decode_unchecked` entry point shares the wire format
+	// with the validating `Decode::decode` — this is what makes routing a
+	// storage field through `decode_unchecked` a zero-migration change.
+	#[test]
+	fn decode_unchecked_reads_same_bytes() {
+		use crate::ring::DecodeUnchecked;
+
+		let domain_size = RingDomainSize::Domain11;
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let members_set = BandersnatchVrfVerifiable::start_members(domain_size);
+		let commitment = BandersnatchVrfVerifiable::finish_members(members_set);
+
+		let bytes = commitment.encode();
+		let decoded = MembersCommitment::decode_unchecked(&mut &bytes[..]).expect("decode ok");
+		assert_eq!(decoded.encode(), bytes);
+	}
+
+	// `decode_unchecked` must accept inputs that the validating decode path
+	// rejects. Pair this with `decode_bogus_commitment_fails` — without that
+	// test the property below would still hold trivially.
+	#[test]
+	fn decode_unchecked_skips_validation() {
+		use crate::ring::DecodeUnchecked;
+
+		let zero_bytes = vec![0u8; BandersnatchSha512Ell2::MEMBERS_COMMITMENT_SIZE];
+
+		// Validated path still rejects (sanity).
+		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
+
+		// Unchecked path accepts the same bytes.
+		assert!(MembersCommitment::decode_unchecked(&mut &zero_bytes[..]).is_ok());
+	}
+
 	// A proof with trailing garbage bytes must not be accepted, otherwise the same
 	// underlying signature could be re-encoded as multiple distinct byte arrays.
 	#[test]

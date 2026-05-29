@@ -13,6 +13,36 @@ use smallvec::SmallVec;
 pub mod mock;
 pub mod ring;
 
+/// SCALE decoding that may skip backend-specific validation (e.g. arkworks
+/// curve-point subgroup checks) for values arriving from a trusted source.
+///
+/// The default `Decode` impls for the ring types ([`ring::MembersSet`],
+/// [`ring::MembersCommitment`], [`ring::StaticChunk`], [`ring::ProverState`])
+/// validate every curve point — the right behaviour at trust boundaries
+/// (extrinsic arguments, XCM payloads, anything crossing an untrusted edge).
+/// Reading a value that was already validated on the way in repeats that work
+/// for nothing.
+///
+/// Implementors expose a parallel `decode_unchecked` entry point that reads
+/// the exact same bytes without revalidating. The supertrait [`Decode`]
+/// expresses that the two paths share the same wire format; only the
+/// validation policy differs.
+///
+/// The default method body just delegates to [`Decode::decode`], which is
+/// the correct behaviour for types with no curve content. Backends
+/// override with a validation-bypassing path; see
+/// [`ring::impl_common_traits`].
+///
+/// Use only for values that were validated at their ingress point. Do not
+/// call on data that arrives from an untrusted source.
+pub trait DecodeUnchecked: Sized + Decode {
+	fn decode_unchecked<I: parity_scale_codec::Input>(
+		input: &mut I,
+	) -> Result<Self, parity_scale_codec::Error> {
+		Self::decode(input)
+	}
+}
+
 // Fixed types:
 
 /// Cryptographic identifier for a person within a specific application which deals with people.

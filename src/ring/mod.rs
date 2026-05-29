@@ -22,6 +22,14 @@ pub mod bandersnatch;
 const UNCOMPRESSED: ark_scale::Usage =
 	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::Yes);
 
+/// Uncompressed encoding mode without curve-point validation. Used by the
+/// [`DecodeUnchecked`] entry points for decoding values from trusted sources
+/// where the validation cost has already been paid on the way in.
+const UNCOMPRESSED_UNCHECKED: ark_scale::Usage =
+	ark_scale::make_usage(ark_serialize::Compress::No, ark_serialize::Validate::No);
+
+pub use crate::DecodeUnchecked;
+
 /// Domain sizes for the PCS (Polynomial Commitment Scheme).
 ///
 /// This determines the maximum ring size that can be supported for a ring suite.
@@ -355,6 +363,18 @@ macro_rules! impl_common_traits {
 		impl<S: $bound> core::cmp::Eq for $type_name<S> {}
 
 		impl<S: $bound> DecodeWithMemTracking for $type_name<S> {}
+
+		impl<S: $bound> DecodeUnchecked for $type_name<S> {
+			fn decode_unchecked<I: ark_scale::scale::Input>(
+				input: &mut I,
+			) -> Result<Self, ark_scale::scale::Error> {
+				let a: ark_scale::ArkScale<Self, { UNCOMPRESSED_UNCHECKED }> =
+					<ark_scale::ArkScale<Self, { UNCOMPRESSED_UNCHECKED }> as ark_scale::scale::Decode>::decode(
+						input,
+					)?;
+				Ok(a.0)
+			}
+		}
 	};
 }
 
