@@ -6,6 +6,7 @@ pub use ark_vrf;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
 	VrfIo,
+	reexports::ark_ec::AffineRepr,
 	ring::{RingSuite, Verifier},
 };
 use bounded_collections::{BoundedVec, Get};
@@ -411,6 +412,19 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersCommitment<S> {
 
 pub(crate) type PublicKey<S> = ark_vrf::Public<S>;
 
+/// Decode a member public key, rejecting the neutral element.
+///
+/// The identity passes the subgroup check but has no affine coordinates, so the
+/// ring backend's `xy().unwrap()` would panic on it during construction. Reject it
+/// here so `is_member_valid` and the construction paths agree.
+fn decode_member<S: RingSuiteExt>(bytes: &[u8]) -> Result<PublicKey<S>, Error> {
+	let pk = PublicKey::<S>::deserialize_canonical(bytes).map_err(|_| Error::InvalidMember)?;
+	if pk.0.xy().is_none() {
+		return Err(Error::InvalidMember);
+	}
+	Ok(pk)
+}
+
 /// A chunk of the ring builder's static data (a G1 affine point).
 ///
 /// Used by the `lookup` function in [`GenerateVerifiable::push_members`] to supply
@@ -567,17 +581,20 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<(), Error> {
 		let mut keys = vec![];
 		for member in members {
-			let pk = PublicKey::<S>::deserialize_canonical(member.as_ref())
-				.map_err(|_| Error::InvalidMember)?;
+			let pk = decode_member::<S>(member.as_ref())?;
 			keys.push(pk.0);
 		}
 		let loader = |range: Range<usize>| {
+			let expected = range.len();
 			let items = lookup(range)
 				.ok()?
 				.into_iter()
 				.map(|c| c.0)
 				.collect::<Vec<_>>();
-			Some(items)
+			// Guard against a `lookup` that returns the wrong number of chunks: the
+			// backend only `debug_assert`s the length, so in release a mismatch would
+			// reach the MSM and panic. Returning `None` surfaces `Error::LookupFailed`.
+			(items.len() == expected).then_some(items)
 		};
 		// Per `VerifierKeyBuilder::append` docs: `Err(usize::MAX)` signals an
 		// SRS lookup failure; any other `Err(n)` carries the available-slots
@@ -698,14 +715,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, Error> {
 		let pks = members
-			.map(|m| {
-				PublicKey::<S>::deserialize_canonical(m.as_ref())
-					.map(|pk| pk.0)
-					.map_err(|_| Error::InvalidMember)
-			})
+			.map(|m| decode_member::<S>(m.as_ref()).map(|pk| pk.0))
 			.collect::<Result<Vec<_>, _>>()?;
-		let member = PublicKey::<S>::deserialize_canonical(member.as_ref())
-			.map_err(|_| Error::InvalidMember)?;
+		let member = decode_member::<S>(member.as_ref())?;
 		let prover_idx = pks
 			.iter()
 			.position(|&m| m == member.0)
@@ -783,7 +795,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn is_member_valid(member: &Self::Member) -> bool {
-		PublicKey::<S>::deserialize_canonical(member.as_ref()).is_ok()
+		decode_member::<S>(member.as_ref()).is_ok()
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, Error> {
@@ -806,7 +818,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let Ok(signature) = PlainSignature::<S>::deserialize_canonical(signature.as_ref()) else {
 			return false;
 		};
-		let Ok(public) = PublicKey::<S>::deserialize_canonical(member.as_ref()) else {
+		let Ok(public) = decode_member::<S>(member.as_ref()) else {
 			return false;
 		};
 		public.verify([], message, &signature.proof).is_ok()

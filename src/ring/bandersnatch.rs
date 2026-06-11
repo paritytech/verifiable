@@ -1048,6 +1048,35 @@ mod builder_tests {
 		);
 	}
 
+	// The neutral element passes the subgroup check, so `is_member_valid`
+	// used to accept it while `push_members` panicked deep in the ring-proof crate
+	// `append` path (`xy().unwrap()` on a point with no affine coordinates). Both must
+	// now agree and reject it. Exercises the on-chain `push_members` path.
+	#[test]
+	fn push_members_rejects_identity() {
+		let domain_size = RingDomainSize::Domain11;
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		// Compressed encoding of the neutral element: 0x01 followed by zeros.
+		let mut identity = [0u8; 32];
+		<BandersnatchSha512Ell2 as ark_vrf::Suite>::Affine::zero()
+			.serialize_compressed(&mut identity[..])
+			.unwrap();
+		assert_eq!(identity[0], 0x01);
+		assert!(identity[1..].iter().all(|b| *b == 0));
+
+		// Validity predicate rejects it
+		assert!(!BandersnatchVrfVerifiable::is_member_valid(&identity));
+
+		// Construction returns an error instead of panicking.
+		let (_, builder_params) = start_members_from_params(domain_size);
+		let get_many = chunk_lookup(&builder_params);
+		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
+		let res =
+			BandersnatchVrfVerifiable::push_members(&mut inter, [identity].into_iter(), get_many);
+		assert!(matches!(res, Err(crate::Error::InvalidMember)));
+	}
+
 	fn chunk_lookup(
 		builder_params: &ark_vrf::ring::RingBuilderPcsParams<BandersnatchSha512Ell2>,
 	) -> impl Fn(
