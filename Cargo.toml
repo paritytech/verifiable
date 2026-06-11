@@ -33,6 +33,7 @@ path = "utils/generate_test_keys.rs"
 default = ["std"]
 std = [
     "prover",
+    "secret-split",
     "bounded-collections/std",
     "parity-scale-codec/std",
     "scale-info/std",
@@ -48,6 +49,13 @@ std = [
 builder-params = []
 # Enables ring proof generation (prover) functionality.
 prover = []
+# Side-channel resistant secret scalar multiplication: the secret scalar is split
+# into two random summands before being multiplied by the input point, removing the
+# data dependency exploited by cache/timing attacks. Pulls `ark-std/getrandom` for
+# the OS RNG, so it is only viable in `std` builds, which is also the only place a
+# production prover runs. Bundled into `std` for that reason; `no-std-prover` is
+# test-only and does not need it.
+secret-split = ["ark-vrf/secret-split"]
 # Prover for no-std environments with deterministic ring-proof.
 # Not for production, may be useful for testing.
 no-std-prover = [
