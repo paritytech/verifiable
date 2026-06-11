@@ -2,15 +2,19 @@
 
 // A production prover needs a system RNG for the ring proof's zero-knowledge
 // blinding (sourced via `getrandom_or_panic` deep in the proving stack). That is
-// only wired up when `std` is enabled; the only legitimate no_std prover is the
-// deterministic, non-zero-knowledge one selected by `no-std-prover` (test use
+// only wired up when `std` is enabled; the only no_std prover is the deterministic,
+// non-zero-knowledge one selected by `insecure-deterministic-prover` (test use
 // only). Any other no_std build with `prover` compiles but panics at proof
 // generation, so reject it here instead.
-#[cfg(all(feature = "prover", not(feature = "std"), not(feature = "no-std-prover")))]
+#[cfg(all(
+	feature = "prover",
+	not(feature = "std"),
+	not(feature = "insecure-deterministic-prover")
+))]
 compile_error!(
-	"`prover` on a no_std target requires the `no-std-prover` feature (deterministic, \
-	 testing only). Without it the ring prover has no system RNG and panics during proof \
-	 generation. Use `std` for production proving."
+	"`prover` on a no_std target requires the `insecure-deterministic-prover` feature \
+	 (deterministic, NON-ZERO-KNOWLEDGE, testing only). Without it the ring prover has no \
+	 system RNG and panics during proof generation. Use `std` for production proving."
 );
 
 extern crate alloc;

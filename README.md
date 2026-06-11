@@ -43,10 +43,11 @@ supporting up to 16127 members.
 
 | Feature | Description |
 |---|---|
-| `std` (default) | Enables `prover`, std support, and parallel proving |
+| `std` (default) | Enables `prover`, `secret-split`, std support, and parallel proving |
 | `prover` | Proof generation (`open`, `create`, `create_multi_context`) |
+| `secret-split` | Side-channel-resistant secret scalar multiplication (masks the secret before EC multiplication). Requires a system RNG, so it is only enabled under `std` |
 | `builder-params` | Includes precomputed ring builder params for building ring commitments |
-| `no-std-prover` | Deterministic prover for `no_std` environments (testing only) |
+| `insecure-deterministic-prover` | **Insecure, testing only.** Deterministic `no_std` prover whose proofs are trivially deanonymizable (non-zero-knowledge). Never enable for production |
 | `mock` | Exposes the `mock` module with a non-cryptographic `Mock` implementation for tests |
 
 For verifier-only builds (e.g. on-chain), disable default features.

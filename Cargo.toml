@@ -53,12 +53,16 @@ prover = []
 # into two random summands before being multiplied by the input point, removing the
 # data dependency exploited by cache/timing attacks. Pulls `ark-std/getrandom` for
 # the OS RNG, so it is only viable in `std` builds, which is also the only place a
-# production prover runs. Bundled into `std` for that reason; `no-std-prover` is
-# test-only and does not need it.
+# production prover runs. Bundled into `std` for that reason; the deterministic
+# test prover does not need it.
 secret-split = ["ark-vrf/secret-split"]
-# Prover for no-std environments with deterministic ring-proof.
-# Not for production, may be useful for testing.
-no-std-prover = [
+# Deterministic, NON-ZERO-KNOWLEDGE prover for `no_std`/test environments.
+# DO NOT USE IN PRODUCTION: this enables `ark-vrf/test-vectors`, which zeroes the
+# ring proof's blinding rows instead of sampling randomness. The resulting proofs
+# verify normally but are trivially deanonymizable by a passive observer (the ring
+# member index is recoverable from public data). Exists only so the prover can run
+# in `no_std` without a system RNG, for testing.
+insecure-deterministic-prover = [
     "prover",
     "ark-vrf/test-vectors",
 ]
