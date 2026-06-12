@@ -30,7 +30,9 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 	}
 
 	#[cfg(not(feature = "prover"))]
-	fn get(domain_size: RingDomainSize) -> Cow<'static, RingContext<BandersnatchSha512Ell2>> {
+	fn ring_context(
+		domain_size: RingDomainSize,
+	) -> Cow<'static, RingContext<BandersnatchSha512Ell2>> {
 		type P = RingContext<BandersnatchSha512Ell2>;
 		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
 			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
