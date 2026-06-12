@@ -2,6 +2,7 @@
 use crate::ring::make_ring_context;
 use crate::ring::{
 	Bls12_381Params, RingDomainSize, RingSuiteExt, RingVrfVerifiable, VerifierCache,
+	make_canonical_kzg_vk,
 };
 pub use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
 
@@ -33,6 +34,15 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
 			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
 		CELLS[domain_size as usize].call_once(|| make_ring_context(domain_size))
+	}
+
+	fn canonical_kzg_vk() -> alloc::borrow::Cow<'static, [u8]> {
+		use spin::Once;
+		static CELL: Once<alloc::vec::Vec<u8>> = Once::new();
+		let bytes = CELL.call_once(|| {
+			make_canonical_kzg_vk::<BandersnatchSha512Ell2>(RingDomainSize::VARIANTS[0])
+		});
+		alloc::borrow::Cow::Borrowed(bytes.as_slice())
 	}
 }
 
@@ -182,6 +192,55 @@ mod tests {
 		// SIGNATURE_SIZE
 		let signature = BandersnatchVrfVerifiable::sign(&secret, b"test").unwrap();
 		assert_eq!(signature.len(), S::SIGNATURE_SIZE);
+	}
+
+	/// The canonical KZG verifier key bytes are the same for every domain size:
+	/// the raw key is `(g1, g2, tau*g2)` from the SRS, untouched by domain
+	/// truncation. `VerifierCache::canonical_kzg_vk` caches a single per-suite
+	/// value computed from one domain; this pins the claim that the choice of
+	/// domain doesn't matter, and that the cache serves exactly that value.
+	#[test]
+	fn canonical_kzg_vk_is_domain_independent() {
+		let values: Vec<_> = RingDomainSize::VARIANTS
+			.iter()
+			.map(|&d| crate::ring::make_canonical_kzg_vk::<BandersnatchSha512Ell2>(d))
+			.collect();
+		assert!(values.iter().all(|v| *v == values[0]));
+		// G1 (96) + 2 x G2 (2 * 192), uncompressed.
+		assert_eq!(values[0].len(), 480);
+		assert_eq!(
+			*BandersnatchVerifierCache::canonical_kzg_vk(),
+			values[0][..]
+		);
+	}
+
+	/// Pin the field-order assumptions behind `make_canonical_kzg_vk` against
+	/// a manual reconstruction from the SRS itself. The raw KZG verifier key is
+	/// built by `w3f-pcs` as `{g1: powers_in_g1[0], g2: powers_in_g2[0],
+	/// tau_in_g2: powers_in_g2[1]}` and serialized in that field order, so the
+	/// bytes extracted from the serialized `RingVerifierKey` must equal those
+	/// three SRS points serialized back to back. If the serialization order of
+	/// `RingVerifierKey` (vk vs. commitment) or of the raw vk's fields ever
+	/// changes, this exact comparison fails.
+	#[cfg(feature = "prover")]
+	#[test]
+	fn canonical_kzg_vk_field_order_assumption_holds() {
+		let domain = RingDomainSize::Domain11;
+		let pcs_params = &bandersnatch_ring_setup(domain).pcs_params;
+
+		let mut expected = Vec::new();
+		pcs_params.powers_in_g1[0]
+			.serialize_uncompressed(&mut expected)
+			.unwrap();
+		pcs_params.powers_in_g2[0]
+			.serialize_uncompressed(&mut expected)
+			.unwrap();
+		pcs_params.powers_in_g2[1]
+			.serialize_uncompressed(&mut expected)
+			.unwrap();
+
+		let canonical = crate::ring::make_canonical_kzg_vk::<BandersnatchSha512Ell2>(domain);
+		assert_eq!(canonical, expected);
 	}
 
 	/// Verify that proof sizes match the `RingSuiteExt` size constants.
@@ -1075,6 +1134,116 @@ mod builder_tests {
 		let res =
 			BandersnatchVrfVerifiable::push_members(&mut inter, [identity].into_iter(), get_many);
 		assert!(matches!(res, Err(crate::Error::InvalidMember)));
+	}
+
+	// Regression for the trusted-setup pinning fix.
+	// `MembersCommitment` carries its own KZG verifier key, so a member set built
+	// under an attacker-chosen SRS must be rejected by validation logic.
+	// Without the pin the attacker proof below verifies as membership; with it,
+	// the non-canonical root is refused before the pairing check is ever reached.
+	#[test]
+	fn validate_rejects_non_canonical_verifier_key() {
+		use ark_vrf::ring::{Prover, RingSetup};
+
+		type S = BandersnatchSha512Ell2;
+		let domain_size = RingDomainSize::Domain11;
+		let context = b"ctx";
+		let message = b"msg";
+		let prover_idx = 0usize;
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let secrets: Vec<_> = (0..3)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+			.collect();
+		let member_keys: Vec<_> = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect();
+
+		// Positive control: the same members, built canonically, validate.
+		let canonical_members = build_members(member_keys.iter().copied(), domain_size);
+		let commitment = BandersnatchVrfVerifiable::open(
+			domain_size,
+			&member_keys[prover_idx],
+			member_keys.iter().cloned(),
+		)
+		.unwrap();
+		let (canonical_proof, _) =
+			BandersnatchVrfVerifiable::create(commitment, &secrets[prover_idx], context, message)
+				.unwrap();
+		assert!(
+			BandersnatchVrfVerifiable::validate(
+				domain_size,
+				&canonical_proof,
+				&canonical_members,
+				context,
+				message,
+			)
+			.is_ok()
+		);
+
+		// Attacker setup: a structured reference string from a seed of their
+		// choosing, so the embedded KZG verifier key is not the canonical one.
+		let ring_size = domain_size.max_ring_size::<S>();
+		let attacker_setup = RingSetup::<S>::from_seed(ring_size, [0xAB; 32]);
+		let pks: Vec<_> = member_keys
+			.iter()
+			.map(|m| crate::ring::decode_member::<S>(m.as_ref()).unwrap().0)
+			.collect();
+
+		// Attacker root: same members, but the verifier key is for the attacker SRS.
+		let attacker_members =
+			crate::ring::MembersCommitment(attacker_setup.verifier_key(&pks).unwrap());
+
+		// It differs from the canonical root for the same members.
+		assert_ne!(canonical_members.encode(), attacker_members.encode());
+
+		// A ring proof that verifies under the attacker setup (the forgery vehicle),
+		// assembled exactly as `create_multi_context` would, but with the attacker's
+		// prover key.
+		let prover_key = attacker_setup.prover_key(&pks).unwrap();
+		let ring_prover = attacker_setup
+			.ring_context()
+			.ring_prover(prover_key, prover_idx);
+		let input_msg = [<S as RingSuiteExt>::VRF_INPUT_DOMAIN, context].concat();
+		let input = ark_vrf::Input::<S>::new(&input_msg).unwrap();
+		let output = secrets[prover_idx].output(input);
+		let io = ark_vrf::VrfIo { input, output };
+		let ring_proof = secrets[prover_idx].prove([io], message, &ring_prover);
+
+		let mut outputs = crate::ContextVec::new();
+		outputs.push(output);
+		let signature = crate::ring::RingVrfSignature::<S> {
+			outputs: crate::ring::RingVrfOutputs(outputs),
+			proof: ring_proof,
+		};
+		let mut buf = Vec::new();
+		signature.serialize_compressed(&mut buf).unwrap();
+		let attacker_proof: <BandersnatchVrfVerifiable as GenerateVerifiable>::Proof =
+			bounded_collections::BoundedVec::try_from(buf).unwrap();
+
+		// The non-canonical root is rejected on the verifier-key check, for both the
+		// single and batch verification paths, regardless of the proof supplied.
+		assert_eq!(
+			BandersnatchVrfVerifiable::validate(
+				domain_size,
+				&attacker_proof,
+				&attacker_members,
+				context,
+				message,
+			),
+			Err(crate::Error::VerificationFailed),
+		);
+
+		let batch = vec![crate::BatchProofItem {
+			proof: attacker_proof,
+			context: context.to_vec(),
+			message: message.to_vec(),
+		}];
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(domain_size, &attacker_members, &batch),
+			Err(crate::Error::VerificationFailed),
+		);
 	}
 
 	fn chunk_lookup(
