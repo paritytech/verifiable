@@ -1,5 +1,5 @@
 use alloc::{borrow::Cow, vec};
-use core::{marker::PhantomData, ops::Deref, ops::Range};
+use core::{marker::PhantomData, ops::Range};
 
 pub use ark_vrf;
 
@@ -7,7 +7,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
 	VrfIo,
 	reexports::ark_ec::AffineRepr,
-	ring::{RingSuite, Verifier},
+	ring::{RingContext, RingSuite, Verifier},
 };
 use bounded_collections::{BoundedVec, Get};
 use parity_scale_codec::{Decode, Encode};
@@ -153,67 +153,72 @@ pub fn ring_verifier_builder_params<S: RingSuiteExt>(
 }
 
 /// Construct ring context for the given domain size.
-pub fn make_ring_context<S: RingSuiteExt>(
-	domain_size: RingDomainSize,
-) -> ark_vrf::ring::RingContext<S> {
+pub fn make_ring_context<S: RingSuiteExt>(domain_size: RingDomainSize) -> RingContext<S> {
 	let ring_size = domain_size.max_ring_size::<S>();
-	ark_vrf::ring::RingContext::<S>::new(ring_size)
+	RingContext::<S>::new(ring_size)
 }
 
 /// Trait for caching ring context.
-///
-/// The `Handle` associated type allows different caching strategies.
 pub trait VerifierCache<S: RingSuiteExt> {
-	/// Handle type returned by the cache. Must deref to `RingContext<S>`.
-	type Handle: Deref<Target = ark_vrf::ring::RingContext<S>>;
-
 	/// Get or construct ring context for the given domain size.
-	fn get(domain_size: RingDomainSize) -> Self::Handle;
+	///
+	/// The default implementation reconstructs an owned context on every
+	/// call; cache implementations should override this and serve a borrow
+	/// of a value constructed once per domain.
+	fn ring_context(domain_size: RingDomainSize) -> Cow<'static, RingContext<S>> {
+		Cow::Owned(make_ring_context(domain_size))
+	}
 
-	/// Uncompressed serialization of the canonical KZG verifier key for this
-	/// suite, as used by the verifier-key pinning check in `validate`/
-	/// `batch_validate`.
+	/// The canonical KZG (PCS) verifier params for this suite, as used by the
+	/// verifier-key pinning check in `validate`/`batch_validate`.
 	///
 	/// The value is domain-size independent so there is a single canonical
 	/// value per suite. The default implementation recomputes it from the
 	/// embedded empty-ring data on every call; cache implementations should
 	/// override this and serve a value computed once.
-	fn canonical_kzg_vk() -> Cow<'static, [u8]> {
-		Cow::Owned(make_canonical_kzg_vk::<S>(RingDomainSize::VARIANTS[0]))
+	fn verifier_params() -> ark_vrf::ring::PcsVerifierParams<S> {
+		make_canonical_pcs_vk::<S>()
 	}
+
+	/// The empty-ring [`MembersSet`] for the given domain size, as used by
+	/// `GenerateVerifiable::start_members`.
+	///
+	/// Returned by value since callers mutate it. The default implementation
+	/// deserializes the embedded empty-ring data on every call; cache
+	/// implementations should override this and serve a clone of a value
+	/// deserialized once per domain.
+	fn empty_members_set(domain_size: RingDomainSize) -> MembersSet<S> {
+		make_empty_members_set(domain_size)
+	}
+}
+
+/// Deserialize the empty-ring [`MembersSet`] from the suite's embedded data
+/// for the given domain size.
+pub fn make_empty_members_set<S: RingSuiteExt>(domain_size: RingDomainSize) -> MembersSet<S> {
+	let data = S::CurveParams::empty_ring_commitment(domain_size);
+	MembersSet::deserialize_uncompressed_unchecked(data).expect("embedded empty-ring data is valid")
 }
 
 /// Trait for caching ring setup.
-///
-/// The `Handle` associated type allows different caching strategies.
 #[cfg(feature = "prover")]
 pub trait ProverCache<S: RingSuiteExt> {
-	/// Handle type returned by the cache. Must deref to `RingSetup<S>`.
-	type Handle: Deref<Target = ark_vrf::ring::RingSetup<S>>;
-
 	/// Get or construct ring setup for the given domain size.
-	fn get(domain_size: RingDomainSize) -> Self::Handle;
+	///
+	/// The default implementation reconstructs an owned setup on every call;
+	/// cache implementations should override this and serve a borrow of a
+	/// value constructed once per domain.
+	fn ring_setup(domain_size: RingDomainSize) -> Cow<'static, ark_vrf::ring::RingSetup<S>> {
+		Cow::Owned(make_ring_setup::<S>(domain_size))
+	}
 }
 
-/// Null prover params cache: always constructs new params without caching.
+/// Null params cache: always reconstructs values without caching.
 pub type NullCache = ();
 
 #[cfg(feature = "prover")]
-impl<S: RingSuiteExt> ProverCache<S> for NullCache {
-	type Handle = alloc::boxed::Box<ark_vrf::ring::RingSetup<S>>;
+impl<S: RingSuiteExt> ProverCache<S> for NullCache {}
 
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		alloc::boxed::Box::new(make_ring_setup::<S>(domain_size))
-	}
-}
-
-impl<S: RingSuiteExt> VerifierCache<S> for NullCache {
-	type Handle = alloc::boxed::Box<ark_vrf::ring::RingContext<S>>;
-
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		alloc::boxed::Box::new(make_ring_context::<S>(domain_size))
-	}
-}
+impl<S: RingSuiteExt> VerifierCache<S> for NullCache {}
 
 /// Fixed-size byte array used to represent a serialized cryptographic object
 /// (public key, proof, or signature).
@@ -582,60 +587,38 @@ fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 	output.hash::<32>()
 }
 
-/// Compute the uncompressed serialization of the canonical KZG verifier key,
-/// recovered from the embedded empty-ring data for `domain`.
+/// Recover the canonical KZG (PCS) verifier params from the suite's embedded
+/// empty-ring data.
 ///
-/// The result is independent of `domain`: the raw KZG key is `(g1, g2, tau*g2)`
+/// The value is domain-size independent: the raw KZG key is `(g1, g2, tau*g2)`
 /// taken from the suite's shipped (Zcash ceremony) SRS, and domain-size
-/// truncation does not touch those points. Any domain works; callers caching a
-/// single per-suite value can pass whichever is cheapest.
-///
-/// This is the one place relying on a serialization-layout fact:
-/// [`ark_vrf::ring::RingVerifierKey`] serializes as `kzg_vk || ring_commitment`,
-/// with the KZG key first, so its length is the total length minus the trailing
-/// commitment's. Both the layout and the domain-independence claim are pinned by
-/// tests in the `bandersnatch` module.
-///
-/// TODO: drop this byte-level recovery once ark-vrf exposes the raw KZG
-/// verifier key; the pinning check then becomes a structural comparison via
-/// `RingVerifierKey::from_commitment_and_kzg_vk` + `Eq`.
-pub fn make_canonical_kzg_vk<S: RingSuiteExt>(domain: RingDomainSize) -> Vec<u8> {
-	// Canonical verifier key for the empty ring at this domain. Its embedded KZG
-	// key is canonical by construction; its commitment is irrelevant here.
-	let canonical =
-		RingVrfVerifiable::<S>::finish_members(RingVrfVerifiable::<S>::start_members(domain));
-
-	let mut bytes = Vec::new();
-	canonical
+/// truncation does not touch those points. The claim is pinned by tests in the
+/// `bandersnatch` module.
+pub fn make_canonical_pcs_vk<S: RingSuiteExt>() -> ark_vrf::ring::PcsVerifierParams<S> {
+	// The embedded empty-ring builder carries the canonical params by
+	// construction; any domain yields the same value, so use the first.
+	RingVrfVerifiable::<S>::start_members(RingDomainSize::VARIANTS[0])
 		.0
-		.serialize_uncompressed(&mut bytes)
-		.expect("serialization into a Vec is infallible");
-	let commitment_len = canonical
-		.0
-		.commitment()
-		.serialized_size(ark_serialize::Compress::No);
-	let vk_len = bytes
-		.len()
-		.checked_sub(commitment_len)
-		.expect("a verifier key embeds its own commitment");
-	bytes.truncate(vk_len);
-	bytes
+		.pcs_verifier_params()
 }
 
 /// Reject a member set whose embedded KZG verifier key is not the canonical one
 /// for this suite.
+///
+/// A verifier key rebuilt from the members' own ring commitment and the
+/// canonical params must equal the members value itself; any difference can
+/// only come from a non-canonical embedded key. The comparison goes through
+/// [`MembersCommitment`]'s encode-based `PartialEq`: the wrapped key type's
+/// derived `Eq` carries unsatisfiable bounds on the PCS scheme marker type, so
+/// it cannot be compared directly.
 fn ensure_canonical_verifier_key<S: RingSuiteExt>(
 	members: &MembersCommitment<S>,
 ) -> Result<(), Error> {
-	let canonical_vk = S::VerifierCache::canonical_kzg_vk();
-	let mut members_bytes = Vec::new();
-	members
-		.0
-		.serialize_uncompressed(&mut members_bytes)
-		.expect("serialization into a Vec is infallible");
-	if members_bytes.len() < canonical_vk.len()
-		|| members_bytes[..canonical_vk.len()] != *canonical_vk
-	{
+	let canonical = MembersCommitment(ark_vrf::ring::verifier_key_from_commitment::<S>(
+		members.0.commitment(),
+		S::VerifierCache::verifier_params(),
+	));
+	if *members != canonical {
 		return Err(Error::VerificationFailed);
 	}
 	Ok(())
@@ -658,9 +641,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Config = RingDomainSize;
 
 	fn start_members(config: Self::Config) -> Self::Intermediate {
-		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = S::CurveParams::empty_ring_commitment(config);
-		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
+		S::VerifierCache::empty_members_set(config)
 	}
 
 	fn push_members(
@@ -724,8 +705,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<AliasVec, Error> {
 		ensure_canonical_verifier_key::<S>(members)?;
 
-		let verifier_params = S::VerifierCache::get(config);
-		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
+		let verifier_context = S::VerifierCache::ring_context(config);
+		let ring_verifier = verifier_context.ring_verifier(members.0.clone());
 
 		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
 
@@ -766,8 +747,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<Vec<Alias>, Error> {
 		ensure_canonical_verifier_key::<S>(members)?;
 
-		let verifier_params = S::VerifierCache::get(config);
-		let verifier = verifier_params.ring_verifier(members.0.clone());
+		let verifier_context = S::VerifierCache::ring_context(config);
+		let verifier = verifier_context.ring_verifier(members.0.clone());
 
 		let mut aliases = Vec::with_capacity(proofs.len());
 		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(&verifier);
@@ -815,7 +796,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.iter()
 			.position(|&m| m == member.0)
 			.ok_or(Error::NotInRing)? as u32;
-		let prover_key = S::ProverCache::get(config)
+		let prover_key = S::ProverCache::ring_setup(config)
 			.prover_key(&pks)
 			.map_err(|_| Error::NotInRing)?;
 		Ok(ProverState {
@@ -838,13 +819,13 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		}
 		let domain_size =
 			RingDomainSize::try_from(commitment.domain_size).map_err(|_| Error::DecodeError)?;
-		let prover_params = S::ProverCache::get(domain_size);
-		if commitment.prover_idx >= prover_params.max_ring_size() as u32 {
+		let ring_setup = S::ProverCache::ring_setup(domain_size);
+		if commitment.prover_idx >= ring_setup.max_ring_size() as u32 {
 			return Err(Error::NotInRing);
 		}
 
 		let ring_prover =
-			prover_params.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
+			ring_setup.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
 
 		let (ios, aliases, outputs): (ContextVec<_>, AliasVec, ContextVec<_>) = contexts
 			.iter()
