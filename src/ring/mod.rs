@@ -705,8 +705,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<AliasVec, Error> {
 		ensure_canonical_verifier_key::<S>(members)?;
 
-		let verifier_params = S::VerifierCache::ring_context(config);
-		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
+		let verifier_context = S::VerifierCache::ring_context(config);
+		let ring_verifier = verifier_context.ring_verifier(members.0.clone());
 
 		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
 
@@ -747,8 +747,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<Vec<Alias>, Error> {
 		ensure_canonical_verifier_key::<S>(members)?;
 
-		let verifier_params = S::VerifierCache::ring_context(config);
-		let verifier = verifier_params.ring_verifier(members.0.clone());
+		let verifier_context = S::VerifierCache::ring_context(config);
+		let verifier = verifier_context.ring_verifier(members.0.clone());
 
 		let mut aliases = Vec::with_capacity(proofs.len());
 		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(&verifier);
@@ -819,13 +819,13 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		}
 		let domain_size =
 			RingDomainSize::try_from(commitment.domain_size).map_err(|_| Error::DecodeError)?;
-		let prover_params = S::ProverCache::ring_setup(domain_size);
-		if commitment.prover_idx >= prover_params.max_ring_size() as u32 {
+		let ring_setup = S::ProverCache::ring_setup(domain_size);
+		if commitment.prover_idx >= ring_setup.max_ring_size() as u32 {
 			return Err(Error::NotInRing);
 		}
 
 		let ring_prover =
-			prover_params.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
+			ring_setup.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
 
 		let (ios, aliases, outputs): (ContextVec<_>, AliasVec, ContextVec<_>) = contexts
 			.iter()
