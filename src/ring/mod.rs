@@ -1,4 +1,4 @@
-use alloc::{borrow::Cow, vec};
+use alloc::vec;
 use core::{marker::PhantomData, ops::Deref, ops::Range};
 
 pub use ark_vrf;
@@ -170,16 +170,15 @@ pub trait VerifierCache<S: RingSuiteExt> {
 	/// Get or construct ring context for the given domain size.
 	fn get(domain_size: RingDomainSize) -> Self::Handle;
 
-	/// Uncompressed serialization of the canonical KZG verifier key for this
-	/// suite, as used by the verifier-key pinning check in `validate`/
-	/// `batch_validate`.
+	/// The canonical KZG (PCS) verifier params for this suite, as used by the
+	/// verifier-key pinning check in `validate`/`batch_validate`.
 	///
 	/// The value is domain-size independent so there is a single canonical
 	/// value per suite. The default implementation recomputes it from the
 	/// embedded empty-ring data on every call; cache implementations should
 	/// override this and serve a value computed once.
-	fn canonical_kzg_vk() -> Cow<'static, [u8]> {
-		Cow::Owned(make_canonical_kzg_vk::<S>(RingDomainSize::VARIANTS[0]))
+	fn canonical_pcs_vk() -> ark_vrf::ring::PcsVerifierParams<S> {
+		make_canonical_pcs_vk::<S>()
 	}
 }
 
@@ -582,60 +581,38 @@ fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 	output.hash::<32>()
 }
 
-/// Compute the uncompressed serialization of the canonical KZG verifier key,
-/// recovered from the embedded empty-ring data for `domain`.
+/// Recover the canonical KZG (PCS) verifier params from the suite's embedded
+/// empty-ring data.
 ///
-/// The result is independent of `domain`: the raw KZG key is `(g1, g2, tau*g2)`
+/// The value is domain-size independent: the raw KZG key is `(g1, g2, tau*g2)`
 /// taken from the suite's shipped (Zcash ceremony) SRS, and domain-size
-/// truncation does not touch those points. Any domain works; callers caching a
-/// single per-suite value can pass whichever is cheapest.
-///
-/// This is the one place relying on a serialization-layout fact:
-/// [`ark_vrf::ring::RingVerifierKey`] serializes as `kzg_vk || ring_commitment`,
-/// with the KZG key first, so its length is the total length minus the trailing
-/// commitment's. Both the layout and the domain-independence claim are pinned by
-/// tests in the `bandersnatch` module.
-///
-/// TODO: drop this byte-level recovery once ark-vrf exposes the raw KZG
-/// verifier key; the pinning check then becomes a structural comparison via
-/// `RingVerifierKey::from_commitment_and_kzg_vk` + `Eq`.
-pub fn make_canonical_kzg_vk<S: RingSuiteExt>(domain: RingDomainSize) -> Vec<u8> {
-	// Canonical verifier key for the empty ring at this domain. Its embedded KZG
-	// key is canonical by construction; its commitment is irrelevant here.
-	let canonical =
-		RingVrfVerifiable::<S>::finish_members(RingVrfVerifiable::<S>::start_members(domain));
-
-	let mut bytes = Vec::new();
-	canonical
+/// truncation does not touch those points. The claim is pinned by tests in the
+/// `bandersnatch` module.
+pub fn make_canonical_pcs_vk<S: RingSuiteExt>() -> ark_vrf::ring::PcsVerifierParams<S> {
+	// The embedded empty-ring builder carries the canonical params by
+	// construction; any domain yields the same value, so use the first.
+	RingVrfVerifiable::<S>::start_members(RingDomainSize::VARIANTS[0])
 		.0
-		.serialize_uncompressed(&mut bytes)
-		.expect("serialization into a Vec is infallible");
-	let commitment_len = canonical
-		.0
-		.commitment()
-		.serialized_size(ark_serialize::Compress::No);
-	let vk_len = bytes
-		.len()
-		.checked_sub(commitment_len)
-		.expect("a verifier key embeds its own commitment");
-	bytes.truncate(vk_len);
-	bytes
+		.pcs_verifier_params()
 }
 
 /// Reject a member set whose embedded KZG verifier key is not the canonical one
 /// for this suite.
+///
+/// A verifier key rebuilt from the members' own ring commitment and the
+/// canonical params must equal the members value itself; any difference can
+/// only come from a non-canonical embedded key. The comparison goes through
+/// [`MembersCommitment`]'s encode-based `PartialEq`: the wrapped key type's
+/// derived `Eq` carries unsatisfiable bounds on the PCS scheme marker type, so
+/// it cannot be compared directly.
 fn ensure_canonical_verifier_key<S: RingSuiteExt>(
 	members: &MembersCommitment<S>,
 ) -> Result<(), Error> {
-	let canonical_vk = S::VerifierCache::canonical_kzg_vk();
-	let mut members_bytes = Vec::new();
-	members
-		.0
-		.serialize_uncompressed(&mut members_bytes)
-		.expect("serialization into a Vec is infallible");
-	if members_bytes.len() < canonical_vk.len()
-		|| members_bytes[..canonical_vk.len()] != *canonical_vk
-	{
+	let canonical = MembersCommitment(ark_vrf::ring::verifier_key_from_commitment::<S>(
+		members.0.commitment(),
+		S::VerifierCache::canonical_pcs_vk(),
+	));
+	if *members != canonical {
 		return Err(Error::VerificationFailed);
 	}
 	Ok(())

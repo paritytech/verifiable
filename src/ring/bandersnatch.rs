@@ -2,7 +2,7 @@
 use crate::ring::make_ring_context;
 use crate::ring::{
 	Bls12_381Params, RingDomainSize, RingSuiteExt, RingVrfVerifiable, VerifierCache,
-	make_canonical_kzg_vk,
+	make_canonical_pcs_vk,
 };
 pub use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
 
@@ -36,13 +36,11 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 		CELLS[domain_size as usize].call_once(|| make_ring_context(domain_size))
 	}
 
-	fn canonical_kzg_vk() -> alloc::borrow::Cow<'static, [u8]> {
+	fn canonical_pcs_vk() -> ark_vrf::ring::PcsVerifierParams<BandersnatchSha512Ell2> {
 		use spin::Once;
-		static CELL: Once<alloc::vec::Vec<u8>> = Once::new();
-		let bytes = CELL.call_once(|| {
-			make_canonical_kzg_vk::<BandersnatchSha512Ell2>(RingDomainSize::VARIANTS[0])
-		});
-		alloc::borrow::Cow::Borrowed(bytes.as_slice())
+		static CELL: Once<ark_vrf::ring::PcsVerifierParams<BandersnatchSha512Ell2>> = Once::new();
+		CELL.call_once(make_canonical_pcs_vk::<BandersnatchSha512Ell2>)
+			.clone()
 	}
 }
 
@@ -194,53 +192,37 @@ mod tests {
 		assert_eq!(signature.len(), S::SIGNATURE_SIZE);
 	}
 
-	/// The canonical KZG verifier key bytes are the same for every domain size:
-	/// the raw key is `(g1, g2, tau*g2)` from the SRS, untouched by domain
-	/// truncation. `VerifierCache::canonical_kzg_vk` caches a single per-suite
-	/// value computed from one domain; this pins the claim that the choice of
-	/// domain doesn't matter, and that the cache serves exactly that value.
+	/// The canonical PCS verifier params are the same for every domain size:
+	/// the raw KZG key is `(g1, g2, tau*g2)` from the SRS, untouched by domain
+	/// truncation. `make_canonical_pcs_vk` relies on this by deriving a single
+	/// per-suite value from an arbitrary domain's embedded data; this pins the
+	/// claim against every domain's data, and that the cache serves that value.
 	#[test]
-	fn canonical_kzg_vk_is_domain_independent() {
-		let values: Vec<_> = RingDomainSize::VARIANTS
-			.iter()
-			.map(|&d| crate::ring::make_canonical_kzg_vk::<BandersnatchSha512Ell2>(d))
-			.collect();
-		assert!(values.iter().all(|v| *v == values[0]));
-		// G1 (96) + 2 x G2 (2 * 192), uncompressed.
-		assert_eq!(values[0].len(), 480);
-		assert_eq!(
-			*BandersnatchVerifierCache::canonical_kzg_vk(),
-			values[0][..]
-		);
+	fn canonical_pcs_vk_is_domain_independent() {
+		let canonical = crate::ring::make_canonical_pcs_vk::<BandersnatchSha512Ell2>();
+		for &domain in RingDomainSize::VARIANTS.iter() {
+			let from_domain = BandersnatchVrfVerifiable::start_members(domain)
+				.0
+				.pcs_verifier_params();
+			assert_eq!(from_domain, canonical);
+		}
+		assert_eq!(BandersnatchVerifierCache::canonical_pcs_vk(), canonical);
 	}
 
-	/// Pin the field-order assumptions behind `make_canonical_kzg_vk` against
-	/// a manual reconstruction from the SRS itself. The raw KZG verifier key is
-	/// built by `w3f-pcs` as `{g1: powers_in_g1[0], g2: powers_in_g2[0],
-	/// tau_in_g2: powers_in_g2[1]}` and serialized in that field order, so the
-	/// bytes extracted from the serialized `RingVerifierKey` must equal those
-	/// three SRS points serialized back to back. If the serialization order of
-	/// `RingVerifierKey` (vk vs. commitment) or of the raw vk's fields ever
-	/// changes, this exact comparison fails.
+	/// The canonical PCS verifier params recovered from the embedded empty-ring
+	/// builder data must be exactly the raw KZG verifier key of the shipped SRS:
+	/// `{g1: powers_in_g1[0], g2: powers_in_g2[0], tau_in_g2: powers_in_g2[1]}`.
+	/// Guards against the embedded builder data drifting from the SRS.
 	#[cfg(feature = "prover")]
 	#[test]
-	fn canonical_kzg_vk_field_order_assumption_holds() {
+	fn canonical_pcs_vk_matches_srs() {
 		let domain = RingDomainSize::Domain11;
 		let pcs_params = &bandersnatch_ring_setup(domain).pcs_params;
 
-		let mut expected = Vec::new();
-		pcs_params.powers_in_g1[0]
-			.serialize_uncompressed(&mut expected)
-			.unwrap();
-		pcs_params.powers_in_g2[0]
-			.serialize_uncompressed(&mut expected)
-			.unwrap();
-		pcs_params.powers_in_g2[1]
-			.serialize_uncompressed(&mut expected)
-			.unwrap();
-
-		let canonical = crate::ring::make_canonical_kzg_vk::<BandersnatchSha512Ell2>(domain);
-		assert_eq!(canonical, expected);
+		let canonical = crate::ring::make_canonical_pcs_vk::<BandersnatchSha512Ell2>();
+		assert_eq!(canonical.g1, pcs_params.powers_in_g1[0]);
+		assert_eq!(canonical.g2, pcs_params.powers_in_g2[0]);
+		assert_eq!(canonical.tau_in_g2, pcs_params.powers_in_g2[1]);
 	}
 
 	/// Verify that proof sizes match the `RingSuiteExt` size constants.
