@@ -5,9 +5,9 @@ pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
-	VrfIo,
 	reexports::ark_ec::AffineRepr,
 	ring::{RingSuite, Verifier},
+	VrfIo,
 };
 use bounded_collections::{BoundedVec, Get};
 use parity_scale_codec::{Decode, Encode};
@@ -180,6 +180,24 @@ pub trait VerifierCache<S: RingSuiteExt> {
 	fn canonical_pcs_vk() -> ark_vrf::ring::PcsVerifierParams<S> {
 		make_canonical_pcs_vk::<S>()
 	}
+
+	/// The empty-ring [`MembersSet`] for the given domain size, as used by
+	/// `GenerateVerifiable::start_members`.
+	///
+	/// Returned by value since callers mutate it. The default implementation
+	/// deserializes the embedded empty-ring data on every call; cache
+	/// implementations should override this and serve a clone of a value
+	/// deserialized once per domain.
+	fn empty_members_set(domain_size: RingDomainSize) -> MembersSet<S> {
+		make_empty_members_set(domain_size)
+	}
+}
+
+/// Deserialize the empty-ring [`MembersSet`] from the suite's embedded data
+/// for the given domain size.
+pub fn make_empty_members_set<S: RingSuiteExt>(domain_size: RingDomainSize) -> MembersSet<S> {
+	let data = S::CurveParams::empty_ring_commitment(domain_size);
+	MembersSet::deserialize_uncompressed_unchecked(data).expect("embedded empty-ring data is valid")
 }
 
 /// Trait for caching ring setup.
@@ -635,9 +653,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	type Config = RingDomainSize;
 
 	fn start_members(config: Self::Config) -> Self::Intermediate {
-		// TODO: Optimize by caching the deserialized value; must be compatible with the WASM runtime environment.
-		let data = S::CurveParams::empty_ring_commitment(config);
-		MembersSet::deserialize_uncompressed_unchecked(data).unwrap()
+		S::VerifierCache::empty_members_set(config)
 	}
 
 	fn push_members(

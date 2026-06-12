@@ -2,7 +2,7 @@
 use crate::ring::make_ring_context;
 use crate::ring::{
 	Bls12_381Params, RingDomainSize, RingSuiteExt, RingVrfVerifiable, VerifierCache,
-	make_canonical_pcs_vk,
+	make_canonical_pcs_vk, make_empty_members_set,
 };
 pub use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
 
@@ -40,6 +40,18 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 		use spin::Once;
 		static CELL: Once<ark_vrf::ring::PcsVerifierParams<BandersnatchSha512Ell2>> = Once::new();
 		CELL.call_once(make_canonical_pcs_vk::<BandersnatchSha512Ell2>)
+			.clone()
+	}
+
+	fn empty_members_set(
+		domain_size: RingDomainSize,
+	) -> crate::ring::MembersSet<BandersnatchSha512Ell2> {
+		use spin::Once;
+		type M = crate::ring::MembersSet<BandersnatchSha512Ell2>;
+		static CELLS: [Once<M>; RingDomainSize::VARIANTS.len()] =
+			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
+		CELLS[domain_size as usize]
+			.call_once(|| make_empty_members_set(domain_size))
 			.clone()
 	}
 }
@@ -190,6 +202,18 @@ mod tests {
 		// SIGNATURE_SIZE
 		let signature = BandersnatchVrfVerifiable::sign(&secret, b"test").unwrap();
 		assert_eq!(signature.len(), S::SIGNATURE_SIZE);
+	}
+
+	/// The cached empty-ring members set must be indistinguishable from a fresh
+	/// deserialization of the embedded data, for every domain size.
+	#[test]
+	fn empty_members_set_cache_consistency() {
+		for &domain in RingDomainSize::VARIANTS.iter() {
+			assert_eq!(
+				BandersnatchVerifierCache::empty_members_set(domain),
+				crate::ring::make_empty_members_set(domain),
+			);
+		}
 	}
 
 	/// The canonical PCS verifier params are the same for every domain size:
