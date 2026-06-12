@@ -1,13 +1,15 @@
 #[cfg(not(feature = "prover"))]
 use crate::ring::make_ring_context;
 use crate::ring::{
-	Bls12_381Params, RingDomainSize, RingSuiteExt, RingVrfVerifiable, VerifierCache,
-	make_canonical_pcs_vk, make_empty_members_set,
+	make_canonical_pcs_vk, make_empty_members_set, Bls12_381Params, RingContext, RingDomainSize,
+	RingSuiteExt, RingVrfVerifiable, VerifierCache,
 };
+use alloc::borrow::Cow;
 pub use ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2;
+use spin::Once;
 
 #[cfg(feature = "prover")]
-use crate::ring::{ProverCache, make_ring_setup};
+use crate::ring::{make_ring_setup, ProverCache};
 
 /// Bandersnatch ring VRF Verifiable (BandersnatchSha512Ell2 suite).
 pub type BandersnatchVrfVerifiable = RingVrfVerifiable<BandersnatchSha512Ell2>;
@@ -20,24 +22,22 @@ pub type BandersnatchVrfVerifiable = RingVrfVerifiable<BandersnatchSha512Ell2>;
 pub struct BandersnatchVerifierCache;
 
 impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
-	type Handle = &'static ark_vrf::ring::RingContext<BandersnatchSha512Ell2>;
-
 	#[cfg(feature = "prover")]
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		BandersnatchProverCache::get(domain_size).ring_context()
+	fn ring_context(
+		domain_size: RingDomainSize,
+	) -> Cow<'static, RingContext<BandersnatchSha512Ell2>> {
+		Cow::Borrowed(BandersnatchProverCache::setup(domain_size).ring_context())
 	}
 
 	#[cfg(not(feature = "prover"))]
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		use spin::Once;
-		type P = ark_vrf::ring::RingContext<BandersnatchSha512Ell2>;
+	fn get(domain_size: RingDomainSize) -> Cow<'static, RingContext<BandersnatchSha512Ell2>> {
+		type P = RingContext<BandersnatchSha512Ell2>;
 		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
 			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
-		CELLS[domain_size as usize].call_once(|| make_ring_context(domain_size))
+		Cow::Borrowed(CELLS[domain_size as usize].call_once(|| make_ring_context(domain_size)))
 	}
 
-	fn canonical_pcs_vk() -> ark_vrf::ring::PcsVerifierParams<BandersnatchSha512Ell2> {
-		use spin::Once;
+	fn verifier_params() -> ark_vrf::ring::PcsVerifierParams<BandersnatchSha512Ell2> {
 		static CELL: Once<ark_vrf::ring::PcsVerifierParams<BandersnatchSha512Ell2>> = Once::new();
 		CELL.call_once(make_canonical_pcs_vk::<BandersnatchSha512Ell2>)
 			.clone()
@@ -46,7 +46,6 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 	fn empty_members_set(
 		domain_size: RingDomainSize,
 	) -> crate::ring::MembersSet<BandersnatchSha512Ell2> {
-		use spin::Once;
 		type M = crate::ring::MembersSet<BandersnatchSha512Ell2>;
 		static CELLS: [Once<M>; RingDomainSize::VARIANTS.len()] =
 			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
@@ -63,15 +62,24 @@ impl VerifierCache<BandersnatchSha512Ell2> for BandersnatchVerifierCache {
 pub struct BandersnatchProverCache;
 
 #[cfg(feature = "prover")]
-impl ProverCache<BandersnatchSha512Ell2> for BandersnatchProverCache {
-	type Handle = &'static ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>;
-
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		use spin::Once;
+impl BandersnatchProverCache {
+	/// Get or construct the cached ring setup for the given domain size.
+	fn setup(
+		domain_size: RingDomainSize,
+	) -> &'static ark_vrf::ring::RingSetup<BandersnatchSha512Ell2> {
 		type P = ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>;
 		static CELLS: [Once<P>; RingDomainSize::VARIANTS.len()] =
 			[const { Once::new() }; RingDomainSize::VARIANTS.len()];
 		CELLS[domain_size as usize].call_once(|| make_ring_setup(domain_size))
+	}
+}
+
+#[cfg(feature = "prover")]
+impl ProverCache<BandersnatchSha512Ell2> for BandersnatchProverCache {
+	fn ring_setup(
+		domain_size: RingDomainSize,
+	) -> Cow<'static, ark_vrf::ring::RingSetup<BandersnatchSha512Ell2>> {
+		Cow::Borrowed(Self::setup(domain_size))
 	}
 }
 
@@ -104,7 +112,7 @@ mod tests {
 	use ark_vrf::ring::SrsLookup;
 
 	use super::*;
-	use crate::{GenerateVerifiable, ring::ring_signature_size};
+	use crate::{ring::ring_signature_size, GenerateVerifiable};
 
 	// Type aliases for Bandersnatch-specific generic types
 	pub type MembersSet = crate::ring::MembersSet<BandersnatchSha512Ell2>;
@@ -116,7 +124,7 @@ mod tests {
 	pub fn bandersnatch_ring_setup(
 		domain_size: RingDomainSize,
 	) -> &'static ark_vrf::ring::RingSetup<BandersnatchSha512Ell2> {
-		<BandersnatchSha512Ell2 as RingSuiteExt>::ProverCache::get(domain_size)
+		BandersnatchProverCache::setup(domain_size)
 	}
 
 	pub fn start_members_from_params(
@@ -230,7 +238,7 @@ mod tests {
 				.pcs_verifier_params();
 			assert_eq!(from_domain, canonical);
 		}
-		assert_eq!(BandersnatchVerifierCache::canonical_pcs_vk(), canonical);
+		assert_eq!(BandersnatchVerifierCache::verifier_params(), canonical);
 	}
 
 	/// The canonical PCS verifier params recovered from the embedded empty-ring
@@ -297,7 +305,7 @@ mod tests {
 
 #[cfg(test)]
 mod builder_tests {
-	use crate::{GenerateVerifiable, ring::ring_verifier_builder_params};
+	use crate::{ring::ring_verifier_builder_params, GenerateVerifiable};
 
 	use super::*;
 	use ark_scale::MaxEncodedLen;
@@ -306,7 +314,7 @@ mod builder_tests {
 	use parity_scale_codec::{Decode, Encode};
 
 	use tests::{
-		MembersCommitment, MembersSet, bandersnatch_ring_setup, start_members_from_params,
+		bandersnatch_ring_setup, start_members_from_params, MembersCommitment, MembersSet,
 	};
 
 	/// Macro to generate test functions for all implemented domain sizes.
@@ -797,10 +805,12 @@ mod builder_tests {
 		let mut wrong_message_items = batch_items.clone();
 		wrong_message_items[2].message = b"tampered message".to_vec();
 
-		assert!(
-			BandersnatchVrfVerifiable::batch_validate(domain_size, &members, &wrong_message_items,)
-				.is_err()
-		);
+		assert!(BandersnatchVrfVerifiable::batch_validate(
+			domain_size,
+			&members,
+			&wrong_message_items,
+		)
+		.is_err());
 
 		// Test with a proof from a non-member key.
 		// Generate a new key that is NOT in the ring, create a proof using a ring
@@ -1091,16 +1101,14 @@ mod builder_tests {
 		let proof_malleated: <BandersnatchVrfVerifiable as GenerateVerifiable>::Proof =
 			BoundedVec::try_from(bytes).unwrap();
 
-		assert!(
-			BandersnatchVrfVerifiable::validate(
-				domain_size,
-				&proof_malleated,
-				&members,
-				context,
-				message,
-			)
-			.is_err()
-		);
+		assert!(BandersnatchVrfVerifiable::validate(
+			domain_size,
+			&proof_malleated,
+			&members,
+			context,
+			message,
+		)
+		.is_err());
 
 		// Same check via batch_validate.
 		let batch_items = vec![BatchProofItem {
@@ -1177,16 +1185,14 @@ mod builder_tests {
 		let (canonical_proof, _) =
 			BandersnatchVrfVerifiable::create(commitment, &secrets[prover_idx], context, message)
 				.unwrap();
-		assert!(
-			BandersnatchVrfVerifiable::validate(
-				domain_size,
-				&canonical_proof,
-				&canonical_members,
-				context,
-				message,
-			)
-			.is_ok()
-		);
+		assert!(BandersnatchVrfVerifiable::validate(
+			domain_size,
+			&canonical_proof,
+			&canonical_members,
+			context,
+			message,
+		)
+		.is_ok());
 
 		// Attacker setup: a structured reference string from a seed of their
 		// choosing, so the embedded KZG verifier key is not the canonical one.
@@ -1257,8 +1263,8 @@ mod builder_tests {
 	) -> impl Fn(
 		core::ops::Range<usize>,
 	) -> Result<Vec<crate::ring::StaticChunk<BandersnatchSha512Ell2>>, ()>
-	+ Copy
-	+ '_ {
+	       + Copy
+	       + '_ {
 		move |range| {
 			builder_params
 				.lookup(range)

@@ -1,12 +1,12 @@
-use alloc::vec;
-use core::{marker::PhantomData, ops::Deref, ops::Range};
+use alloc::{borrow::Cow, vec};
+use core::{marker::PhantomData, ops::Range};
 
 pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
 	reexports::ark_ec::AffineRepr,
-	ring::{RingSuite, Verifier},
+	ring::{RingContext, RingSuite, Verifier},
 	VrfIo,
 };
 use bounded_collections::{BoundedVec, Get};
@@ -153,22 +153,21 @@ pub fn ring_verifier_builder_params<S: RingSuiteExt>(
 }
 
 /// Construct ring context for the given domain size.
-pub fn make_ring_context<S: RingSuiteExt>(
-	domain_size: RingDomainSize,
-) -> ark_vrf::ring::RingContext<S> {
+pub fn make_ring_context<S: RingSuiteExt>(domain_size: RingDomainSize) -> RingContext<S> {
 	let ring_size = domain_size.max_ring_size::<S>();
-	ark_vrf::ring::RingContext::<S>::new(ring_size)
+	RingContext::<S>::new(ring_size)
 }
 
 /// Trait for caching ring context.
-///
-/// The `Handle` associated type allows different caching strategies.
 pub trait VerifierCache<S: RingSuiteExt> {
-	/// Handle type returned by the cache. Must deref to `RingContext<S>`.
-	type Handle: Deref<Target = ark_vrf::ring::RingContext<S>>;
-
 	/// Get or construct ring context for the given domain size.
-	fn get(domain_size: RingDomainSize) -> Self::Handle;
+	///
+	/// The default implementation reconstructs an owned context on every
+	/// call; cache implementations should override this and serve a borrow
+	/// of a value constructed once per domain.
+	fn ring_context(domain_size: RingDomainSize) -> Cow<'static, RingContext<S>> {
+		Cow::Owned(make_ring_context(domain_size))
+	}
 
 	/// The canonical KZG (PCS) verifier params for this suite, as used by the
 	/// verifier-key pinning check in `validate`/`batch_validate`.
@@ -177,7 +176,7 @@ pub trait VerifierCache<S: RingSuiteExt> {
 	/// value per suite. The default implementation recomputes it from the
 	/// embedded empty-ring data on every call; cache implementations should
 	/// override this and serve a value computed once.
-	fn canonical_pcs_vk() -> ark_vrf::ring::PcsVerifierParams<S> {
+	fn verifier_params() -> ark_vrf::ring::PcsVerifierParams<S> {
 		make_canonical_pcs_vk::<S>()
 	}
 
@@ -201,36 +200,25 @@ pub fn make_empty_members_set<S: RingSuiteExt>(domain_size: RingDomainSize) -> M
 }
 
 /// Trait for caching ring setup.
-///
-/// The `Handle` associated type allows different caching strategies.
 #[cfg(feature = "prover")]
 pub trait ProverCache<S: RingSuiteExt> {
-	/// Handle type returned by the cache. Must deref to `RingSetup<S>`.
-	type Handle: Deref<Target = ark_vrf::ring::RingSetup<S>>;
-
 	/// Get or construct ring setup for the given domain size.
-	fn get(domain_size: RingDomainSize) -> Self::Handle;
+	///
+	/// The default implementation reconstructs an owned setup on every call;
+	/// cache implementations should override this and serve a borrow of a
+	/// value constructed once per domain.
+	fn ring_setup(domain_size: RingDomainSize) -> Cow<'static, ark_vrf::ring::RingSetup<S>> {
+		Cow::Owned(make_ring_setup::<S>(domain_size))
+	}
 }
 
-/// Null prover params cache: always constructs new params without caching.
+/// Null params cache: always reconstructs values without caching.
 pub type NullCache = ();
 
 #[cfg(feature = "prover")]
-impl<S: RingSuiteExt> ProverCache<S> for NullCache {
-	type Handle = alloc::boxed::Box<ark_vrf::ring::RingSetup<S>>;
+impl<S: RingSuiteExt> ProverCache<S> for NullCache {}
 
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		alloc::boxed::Box::new(make_ring_setup::<S>(domain_size))
-	}
-}
-
-impl<S: RingSuiteExt> VerifierCache<S> for NullCache {
-	type Handle = alloc::boxed::Box<ark_vrf::ring::RingContext<S>>;
-
-	fn get(domain_size: RingDomainSize) -> Self::Handle {
-		alloc::boxed::Box::new(make_ring_context::<S>(domain_size))
-	}
-}
+impl<S: RingSuiteExt> VerifierCache<S> for NullCache {}
 
 /// Fixed-size byte array used to represent a serialized cryptographic object
 /// (public key, proof, or signature).
@@ -628,7 +616,7 @@ fn ensure_canonical_verifier_key<S: RingSuiteExt>(
 ) -> Result<(), Error> {
 	let canonical = MembersCommitment(ark_vrf::ring::verifier_key_from_commitment::<S>(
 		members.0.commitment(),
-		S::VerifierCache::canonical_pcs_vk(),
+		S::VerifierCache::verifier_params(),
 	));
 	if *members != canonical {
 		return Err(Error::VerificationFailed);
@@ -717,7 +705,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<AliasVec, Error> {
 		ensure_canonical_verifier_key::<S>(members)?;
 
-		let verifier_params = S::VerifierCache::get(config);
+		let verifier_params = S::VerifierCache::ring_context(config);
 		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
@@ -759,7 +747,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<Vec<Alias>, Error> {
 		ensure_canonical_verifier_key::<S>(members)?;
 
-		let verifier_params = S::VerifierCache::get(config);
+		let verifier_params = S::VerifierCache::ring_context(config);
 		let verifier = verifier_params.ring_verifier(members.0.clone());
 
 		let mut aliases = Vec::with_capacity(proofs.len());
@@ -808,7 +796,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.iter()
 			.position(|&m| m == member.0)
 			.ok_or(Error::NotInRing)? as u32;
-		let prover_key = S::ProverCache::get(config)
+		let prover_key = S::ProverCache::ring_setup(config)
 			.prover_key(&pks)
 			.map_err(|_| Error::NotInRing)?;
 		Ok(ProverState {
@@ -831,7 +819,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		}
 		let domain_size =
 			RingDomainSize::try_from(commitment.domain_size).map_err(|_| Error::DecodeError)?;
-		let prover_params = S::ProverCache::get(domain_size);
+		let prover_params = S::ProverCache::ring_setup(domain_size);
 		if commitment.prover_idx >= prover_params.max_ring_size() as u32 {
 			return Err(Error::NotInRing);
 		}
