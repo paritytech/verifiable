@@ -70,4 +70,3 @@ insecure-deterministic-prover = [
 # of `GenerateVerifiable`. Intended as a test double for downstream crates
 # that exercise code consuming the trait without the ring-VRF machinery.
 mock = ["sha2"]
-
