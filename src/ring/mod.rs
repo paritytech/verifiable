@@ -418,6 +418,11 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersSet<S> {
 /// verification pins the canonical KZG key shipped with the suite and rejects any
 /// value whose embedded key differs, so a member set decoded from an untrusted
 /// source can misstate membership but never the cryptographic setup.
+///
+/// Note the pin covers only the setup embedded in this value. Whether the
+/// commitment honestly represents the claimed member set still depends on it
+/// having been built from canonical SRS chunks; see the trust requirement on
+/// [`GenerateVerifiable::push_members`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
 
@@ -448,6 +453,12 @@ fn decode_member<S: RingSuiteExt>(bytes: &[u8]) -> Result<PublicKey<S>, Error> {
 ///
 /// Used by the `lookup` function in [`GenerateVerifiable::push_members`] to supply
 /// precomputed SRS points needed to update the ring commitment.
+///
+/// Decoding validates that the point is on-curve and in the correct subgroup, but cannot
+/// establish that it is the canonical SRS point for its index: that reference is the full
+/// ring builder params, which is exactly the data externalized through `lookup`. The
+/// integrity of the chunk store is therefore the caller's responsibility; see
+/// [`GenerateVerifiable::push_members`].
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone, Debug)]
 pub struct StaticChunk<S: RingSuiteExt>(pub ark_vrf::ring::G1Affine<S>);
 
@@ -621,7 +632,7 @@ fn ensure_canonical_verifier_key<S: RingSuiteExt>(
 	members
 		.0
 		.serialize_uncompressed(&mut members_bytes)
-		.map_err(|_| Error::Unsupported)?;
+		.expect("serialization into a Vec is infallible");
 	if members_bytes.len() < canonical_vk.len()
 		|| members_bytes[..canonical_vk.len()] != *canonical_vk
 	{

@@ -184,6 +184,11 @@ pub trait GenerateVerifiable {
 	/// A chunk of precomputed static data used by the `lookup` function when pushing members.
 	///
 	/// For ring VRF implementations, this is typically a G1 affine point from the SRS.
+	///
+	/// Decoding only checks well-formedness (e.g. that the point is on the curve and in the
+	/// correct subgroup); it cannot check that a chunk is the *right* point from the canonical
+	/// setup. See [`Self::push_members`] for the trust requirement this places on the chunk
+	/// store.
 	type StaticChunk: Clone + Eq + PartialEq + FullCodec + Debug + TypeInfo + MaxEncodedLen;
 
 	/// A signature attributable to a specific `Member`, verifiable against that member's
@@ -212,6 +217,17 @@ pub trait GenerateVerifiable {
 	/// * the maximum capacity has already been reached
 	/// * the member is invalid (can be checked with `is_member_valid`)
 	/// * the lookup function is invalid
+	///
+	/// # Trust requirement on `lookup`
+	///
+	/// Soundness of the resulting `Members` value depends on `lookup` serving the canonical
+	/// precomputed data (for ring VRF: points of the suite's trusted-setup SRS, at the
+	/// requested indices). This cannot be verified here: chunks have no compact canonical
+	/// reference to check against, and decoding only validates well-formedness. A corrupted
+	/// chunk store yields a `Members` value under the canonical setup that misstates the
+	/// member set, enabling membership forgery that no later check detects. Integrators
+	/// must authenticate the chunk data at ingestion (e.g. hash-check against the published
+	/// builder params, restrict writes to genesis/governance).
 	fn push_members(
 		intermediate: &mut Self::Intermediate,
 		members: impl Iterator<Item = Self::Member>,
