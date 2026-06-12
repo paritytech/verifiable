@@ -1,4 +1,4 @@
-use alloc::vec;
+use alloc::{borrow::Cow, vec};
 use core::{marker::PhantomData, ops::Deref, ops::Range};
 
 pub use ark_vrf;
@@ -169,6 +169,18 @@ pub trait VerifierCache<S: RingSuiteExt> {
 
 	/// Get or construct ring context for the given domain size.
 	fn get(domain_size: RingDomainSize) -> Self::Handle;
+
+	/// Uncompressed serialization of the canonical KZG verifier key for this
+	/// suite, as used by the verifier-key pinning check in `validate`/
+	/// `batch_validate`.
+	///
+	/// The value is domain-size independent so there is a single canonical
+	/// value per suite. The default implementation recomputes it from the
+	/// embedded empty-ring data on every call; cache implementations should
+	/// override this and serve a value computed once.
+	fn canonical_kzg_vk() -> Cow<'static, [u8]> {
+		Cow::Owned(make_canonical_kzg_vk::<S>(RingDomainSize::VARIANTS[0]))
+	}
 }
 
 /// Trait for caching ring setup.
@@ -399,6 +411,18 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersSet<S> {
 ///
 /// This is the compact representation used for proof verification. Produced by
 /// [`GenerateVerifiable::finish_members`] from a [`MembersSet`].
+///
+/// The wrapped [`ark_vrf::ring::RingVerifierKey`] carries not only the ring
+/// commitment but also its own KZG verifier key, i.e. the trusted setup the
+/// membership check runs under. Only the commitment is the caller's to choose:
+/// verification pins the canonical KZG key shipped with the suite and rejects any
+/// value whose embedded key differs, so a member set decoded from an untrusted
+/// source can misstate membership but never the cryptographic setup.
+///
+/// Note the pin covers only the setup embedded in this value. Whether the
+/// commitment honestly represents the claimed member set still depends on it
+/// having been built from canonical SRS chunks; see the trust requirement on
+/// [`GenerateVerifiable::push_members`].
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
 pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
 
@@ -429,6 +453,12 @@ fn decode_member<S: RingSuiteExt>(bytes: &[u8]) -> Result<PublicKey<S>, Error> {
 ///
 /// Used by the `lookup` function in [`GenerateVerifiable::push_members`] to supply
 /// precomputed SRS points needed to update the ring commitment.
+///
+/// Decoding validates that the point is on-curve and in the correct subgroup, but cannot
+/// establish that it is the canonical SRS point for its index: that reference is the full
+/// ring builder params, which is exactly the data externalized through `lookup`. The
+/// integrity of the chunk store is therefore the caller's responsibility; see
+/// [`GenerateVerifiable::push_members`].
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone, Debug)]
 pub struct StaticChunk<S: RingSuiteExt>(pub ark_vrf::ring::G1Affine<S>);
 
@@ -552,6 +582,65 @@ fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 	output.hash::<32>()
 }
 
+/// Compute the uncompressed serialization of the canonical KZG verifier key,
+/// recovered from the embedded empty-ring data for `domain`.
+///
+/// The result is independent of `domain`: the raw KZG key is `(g1, g2, tau*g2)`
+/// taken from the suite's shipped (Zcash ceremony) SRS, and domain-size
+/// truncation does not touch those points. Any domain works; callers caching a
+/// single per-suite value can pass whichever is cheapest.
+///
+/// This is the one place relying on a serialization-layout fact:
+/// [`ark_vrf::ring::RingVerifierKey`] serializes as `kzg_vk || ring_commitment`,
+/// with the KZG key first, so its length is the total length minus the trailing
+/// commitment's. Both the layout and the domain-independence claim are pinned by
+/// tests in the `bandersnatch` module.
+///
+/// TODO: drop this byte-level recovery once ark-vrf exposes the raw KZG
+/// verifier key; the pinning check then becomes a structural comparison via
+/// `RingVerifierKey::from_commitment_and_kzg_vk` + `Eq`.
+pub fn make_canonical_kzg_vk<S: RingSuiteExt>(domain: RingDomainSize) -> Vec<u8> {
+	// Canonical verifier key for the empty ring at this domain. Its embedded KZG
+	// key is canonical by construction; its commitment is irrelevant here.
+	let canonical =
+		RingVrfVerifiable::<S>::finish_members(RingVrfVerifiable::<S>::start_members(domain));
+
+	let mut bytes = Vec::new();
+	canonical
+		.0
+		.serialize_uncompressed(&mut bytes)
+		.expect("serialization into a Vec is infallible");
+	let commitment_len = canonical
+		.0
+		.commitment()
+		.serialized_size(ark_serialize::Compress::No);
+	let vk_len = bytes
+		.len()
+		.checked_sub(commitment_len)
+		.expect("a verifier key embeds its own commitment");
+	bytes.truncate(vk_len);
+	bytes
+}
+
+/// Reject a member set whose embedded KZG verifier key is not the canonical one
+/// for this suite.
+fn ensure_canonical_verifier_key<S: RingSuiteExt>(
+	members: &MembersCommitment<S>,
+) -> Result<(), Error> {
+	let canonical_vk = S::VerifierCache::canonical_kzg_vk();
+	let mut members_bytes = Vec::new();
+	members
+		.0
+		.serialize_uncompressed(&mut members_bytes)
+		.expect("serialization into a Vec is infallible");
+	if members_bytes.len() < canonical_vk.len()
+		|| members_bytes[..canonical_vk.len()] != *canonical_vk
+	{
+		return Err(Error::VerificationFailed);
+	}
+	Ok(())
+}
+
 /// Generic ring VRF implementation parameterized over the ring suite.
 ///
 /// The curve params provider is obtained from `S::CurveParams`.
@@ -633,6 +722,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<AliasVec, Error> {
+		ensure_canonical_verifier_key::<S>(members)?;
+
 		let verifier_params = S::VerifierCache::get(config);
 		let ring_verifier = verifier_params.ring_verifier(members.0.clone());
 
@@ -673,6 +764,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
 	) -> Result<Vec<Alias>, Error> {
+		ensure_canonical_verifier_key::<S>(members)?;
+
 		let verifier_params = S::VerifierCache::get(config);
 		let verifier = verifier_params.ring_verifier(members.0.clone());
 
