@@ -868,6 +868,149 @@ mod builder_tests {
 		);
 	});
 
+	/// Build a self-contained ring of `n` members (seeds derived from `seed_base`)
+	/// for the given domain, returning the secrets, member keys, and finished
+	/// member set commitment.
+	#[cfg(test)]
+	fn build_ring(
+		domain_size: RingDomainSize,
+		seed_base: u8,
+		n: usize,
+	) -> (
+		Vec<<BandersnatchVrfVerifiable as GenerateVerifiable>::Secret>,
+		Vec<<BandersnatchVrfVerifiable as GenerateVerifiable>::Member>,
+		<BandersnatchVrfVerifiable as GenerateVerifiable>::Members,
+	) {
+		let secrets: Vec<_> = (0..n)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([seed_base.wrapping_add(i as u8); 32]))
+			.collect();
+		let keys: Vec<_> = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect();
+		let (_, builder_params) = start_members_from_params(domain_size);
+		let get_many = chunk_lookup(&builder_params);
+		let mut inter = BandersnatchVrfVerifiable::start_members(domain_size);
+		BandersnatchVrfVerifiable::push_members(&mut inter, keys.iter().copied(), get_many).unwrap();
+		let members = BandersnatchVrfVerifiable::finish_members(inter);
+		(secrets, keys, members)
+	}
+
+	// Proofs drawn from two *different* rings (same domain) can be verified in a
+	// single batch, with aliases returned in input order; cross-ring confusion
+	// (a proof checked against the wrong ring) must fail.
+	test_for_all_domains!(batch_validate_multi_ring_across_rings, |domain_size| {
+		use crate::MultiRingBatchProofItem;
+
+		let context = b"Context";
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let (secrets_a, keys_a, members_a) = build_ring(domain_size, 0, 4);
+		let (secrets_b, keys_b, members_b) = build_ring(domain_size, 100, 6);
+
+		let msg_a = b"hello from ring A";
+		let commit_a =
+			BandersnatchVrfVerifiable::open(domain_size, &keys_a[1], keys_a.clone().into_iter())
+				.unwrap();
+		let (proof_a, alias_a) =
+			BandersnatchVrfVerifiable::create(commit_a, &secrets_a[1], context, msg_a).unwrap();
+
+		let msg_b = b"hello from ring B";
+		let commit_b =
+			BandersnatchVrfVerifiable::open(domain_size, &keys_b[3], keys_b.clone().into_iter())
+				.unwrap();
+		let (proof_b, alias_b) =
+			BandersnatchVrfVerifiable::create(commit_b, &secrets_b[3], context, msg_b).unwrap();
+
+		// Interleave the two rings; the output must preserve input order.
+		let items = vec![
+			MultiRingBatchProofItem {
+				config: domain_size,
+				members: &members_a,
+				proof: &proof_a,
+				context,
+				message: msg_a,
+			},
+			MultiRingBatchProofItem {
+				config: domain_size,
+				members: &members_b,
+				proof: &proof_b,
+				context,
+				message: msg_b,
+			},
+		];
+		let aliases = BandersnatchVrfVerifiable::batch_validate_multi_ring(&items).unwrap();
+		assert_eq!(aliases, vec![alias_a, alias_b]);
+
+		// Swap the rings: each proof is now checked against the ring it does not
+		// belong to, so the batch must be rejected.
+		let swapped = vec![
+			MultiRingBatchProofItem {
+				config: domain_size,
+				members: &members_b,
+				proof: &proof_a,
+				context,
+				message: msg_a,
+			},
+			MultiRingBatchProofItem {
+				config: domain_size,
+				members: &members_a,
+				proof: &proof_b,
+				context,
+				message: msg_b,
+			},
+		];
+		assert!(BandersnatchVrfVerifiable::batch_validate_multi_ring(&swapped).is_err());
+	});
+
+	/// Rings built with *different domain sizes* share the same canonical KZG
+	/// verifier key, so their proofs can be aggregated into one batch.
+	#[test]
+	fn batch_validate_multi_ring_mixed_domains() {
+		use crate::MultiRingBatchProofItem;
+
+		let dom_a = RingDomainSize::Domain11;
+		let dom_b = RingDomainSize::Domain16;
+		let _ = bandersnatch_ring_setup(dom_a);
+		let _ = bandersnatch_ring_setup(dom_b);
+
+		let context = b"Context";
+
+		let (secrets_a, keys_a, members_a) = build_ring(dom_a, 1, 5);
+		let (secrets_b, keys_b, members_b) = build_ring(dom_b, 200, 7);
+
+		let msg_a = b"domain 11";
+		let commit_a =
+			BandersnatchVrfVerifiable::open(dom_a, &keys_a[2], keys_a.clone().into_iter()).unwrap();
+		let (proof_a, alias_a) =
+			BandersnatchVrfVerifiable::create(commit_a, &secrets_a[2], context, msg_a).unwrap();
+
+		let msg_b = b"domain 16";
+		let commit_b =
+			BandersnatchVrfVerifiable::open(dom_b, &keys_b[4], keys_b.clone().into_iter()).unwrap();
+		let (proof_b, alias_b) =
+			BandersnatchVrfVerifiable::create(commit_b, &secrets_b[4], context, msg_b).unwrap();
+
+		let items = vec![
+			MultiRingBatchProofItem {
+				config: dom_a,
+				members: &members_a,
+				proof: &proof_a,
+				context,
+				message: msg_a,
+			},
+			MultiRingBatchProofItem {
+				config: dom_b,
+				members: &members_b,
+				proof: &proof_b,
+				context,
+				message: msg_b,
+			},
+		];
+		let aliases = BandersnatchVrfVerifiable::batch_validate_multi_ring(&items).unwrap();
+		assert_eq!(aliases, vec![alias_a, alias_b]);
+	}
+
 	test_for_all_domains!(open_validate_single_vs_multiple_keys, |domain_size| {
 		use std::time::Instant;
 

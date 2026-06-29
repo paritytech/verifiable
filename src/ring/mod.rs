@@ -735,36 +735,79 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		Ok(aliases)
 	}
 
-	// In order to support ulti ring batch verification we need to:
-	// 1. build the verifier from verifier params with bigger domain size
-	//    - We need the one build from the longer SRS
-	// 2. maintain a list of caches (one for each verifier key)
-	//    - the loop below needs to build the `verifier` using the appropriate verifier key
 	fn batch_validate(
 		config: Self::Config,
 		members: &Self::Members,
 		proofs: &[BatchProofItem<Self::Proof>],
 	) -> Result<Vec<Alias>, Error> {
-		ensure_canonical_verifier_key::<S>(members)?;
+		// A single-ring batch is just a multi-ring batch where every item shares
+		// the same config and member set.
+		let items: Vec<_> = proofs
+			.iter()
+			.map(|p| MultiRingBatchProofItem {
+				config,
+				members,
+				proof: &p.proof,
+				context: p.context.as_slice(),
+				message: p.message.as_slice(),
+			})
+			.collect();
+		Self::batch_validate_multi_ring(&items)
+	}
 
-		let verifier_context = S::VerifierCache::ring_context(config);
-		let verifier = verifier_context.ring_verifier(members.0.clone());
+	fn batch_validate_multi_ring(
+		items: &[MultiRingBatchProofItem<Self::Config, Self::Members, Self::Proof>],
+	) -> Result<Vec<Alias>, Error> {
+		if items.is_empty() {
+			return Ok(Vec::new());
+		}
 
-		let mut aliases = Vec::with_capacity(proofs.len());
-		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(&verifier);
-		for BatchProofItem {
-			proof,
-			context,
-			message,
-		} in proofs
-		{
-			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
+		// Building a ring context is expensive, so reuse one per distinct config.
+		let mut contexts: Vec<(RingDomainSize, Cow<'static, RingContext<S>>)> = Vec::new();
+		// One ring verifier per distinct (config, ring root). Each ring's verifier
+		// key is pinned to the canonical KZG key exactly once, as it is built.
+		let mut verifiers: Vec<(RingDomainSize, &Self::Members, ark_vrf::ring::RingVerifier<S>)> =
+			Vec::new();
+
+		for item in items {
+			if verifiers
+				.iter()
+				.any(|(c, m, _)| *c == item.config && *m == item.members)
+			{
+				continue;
+			}
+			ensure_canonical_verifier_key::<S>(item.members)?;
+			let ctx_idx = match contexts.iter().position(|(c, _)| *c == item.config) {
+				Some(idx) => idx,
+				None => {
+					contexts.push((item.config, S::VerifierCache::ring_context(item.config)));
+					contexts.len() - 1
+				}
+			};
+			let verifier = contexts[ctx_idx].1.ring_verifier(item.members.0.clone());
+			verifiers.push((item.config, item.members, verifier));
+		}
+
+		// Every ring is pinned to the same canonical KZG verifier key (the shared
+		// trusted setup), so the batch verifier can be seeded from any ring's
+		// verifier; the seed only contributes its KZG key.
+		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(&verifiers[0].2);
+
+		let mut aliases = Vec::with_capacity(items.len());
+		for item in items {
+			let verifier = &verifiers
+				.iter()
+				.find(|(c, m, _)| *c == item.config && *m == item.members)
+				.expect("a verifier was built for every distinct ring above; qed")
+				.2;
+
+			let input_msg = [S::VRF_INPUT_DOMAIN, item.context].concat();
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-			let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
+			let signature = RingVrfSignature::<S>::deserialize_canonical(item.proof.as_slice())?;
 
 			let outputs = signature.outputs.0.as_slice();
 			if outputs.len() != 1 {
-				// The current batch verifier only supports single-context proofs.
+				// The batch verifier only supports single-context proofs.
 				return Err(Error::Unsupported);
 			}
 			let output = outputs[0];
@@ -773,9 +816,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 			let io = VrfIo { input, output };
 			batch_verifier
-				.push(&verifier, [io], message, &signature.proof)
+				.push(verifier, [io], item.message, &signature.proof)
 				.map_err(|_| Error::VerificationFailed)?;
 		}
+
 		if batch_verifier.verify().is_ok() {
 			return Ok(aliases);
 		}

@@ -134,6 +134,29 @@ pub struct BatchProofItem<Proof> {
 	pub message: Vec<u8>,
 }
 
+/// A single item in a multi-ring batch proof validation request.
+///
+/// Like [`BatchProofItem`], but each proof additionally carries the member set
+/// (ring root) and config it was created against. This lets proofs drawn from
+/// *different* rings be validated together in one batch via
+/// [`GenerateVerifiable::batch_validate_multi_ring`], provided every ring shares
+/// the same KZG SRS (which holds for all rings of a given suite).
+///
+/// All payload fields are borrowed so a batch can be assembled without cloning
+/// proofs or member sets.
+pub struct MultiRingBatchProofItem<'a, Config, Members, Proof> {
+	/// The config (e.g. ring domain size) the proof's ring was built with.
+	pub config: Config,
+	/// The member set (ring root) the proof was created against.
+	pub members: &'a Members,
+	/// The ring VRF proof to validate.
+	pub proof: &'a Proof,
+	/// The context under which the proof was created.
+	pub context: &'a [u8],
+	/// The message that was signed.
+	pub message: &'a [u8],
+}
+
 // The trait. This (alone) must be implemented in its entirely by the Ring-VRF.
 
 /// Trait allowing cryptographic proof of membership of a set with known members under multiple
@@ -370,6 +393,25 @@ pub trait GenerateVerifiable {
 		proofs
 			.iter()
 			.map(|item| Self::validate(config, &item.proof, members, &item.context, &item.message))
+			.collect()
+	}
+
+	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
+	/// in order of input.
+	///
+	/// Unlike [`Self::batch_validate`], the proofs may belong to *different* rings: each
+	/// [`MultiRingBatchProofItem`] carries its own member set (ring root) and config. Backends
+	/// able to aggregate across rings (sharing the same trusted setup) verify them in a single
+	/// batched check; the default implementation simply validates each item against its own ring.
+	///
+	/// Currently only supports single-context proofs. Multi-context proofs should be validated
+	/// individually via [`Self::validate_multi_context`].
+	fn batch_validate_multi_ring(
+		items: &[MultiRingBatchProofItem<Self::Config, Self::Members, Self::Proof>],
+	) -> Result<Vec<Alias>, Error> {
+		items
+			.iter()
+			.map(|item| Self::validate(item.config, item.proof, item.members, item.context, item.message))
 			.collect()
 	}
 

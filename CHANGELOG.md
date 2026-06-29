@@ -39,6 +39,12 @@ All changes are relative to 0.2.0, the last published version.
   - `AliasVec`/`ContextVec` are SmallVec-backed ([#53](https://github.com/paritytech/verifiable/pull/53))
 - **Batch proof validation** ([#26](https://github.com/paritytech/verifiable/pull/26))
   - Added `batch_validate` method and `BatchProofItem` type
+- **Multi-ring batch validation**
+  - Added `batch_validate_multi_ring` method and `MultiRingBatchProofItem` type, verifying
+    proofs from *different* rings in a single batched check. Builds one ring verifier per
+    distinct ring (each pinned to the shared canonical KZG verifier key) and aggregates all
+    proofs into one pairing check; rings may use different `Config` (domain) sizes.
+    `batch_validate` is now a thin single-ring wrapper over it.
 - **Pluggable verifier/prover caches.** `RingSuiteExt` carries `VerifierCache` and
   `ProverCache` associated types (with a `NullCache` no-op impl). The Bandersnatch suite
   ships static caches so verification does not recompute `PiopParams` on every call
