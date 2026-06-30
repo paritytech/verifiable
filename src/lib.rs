@@ -121,18 +121,32 @@ pub enum Error {
 
 /// A single item in a batch proof validation request.
 ///
-/// Groups together a proof with the context and message it was created for,
-/// so that multiple proofs can be validated in a single batch operation via
-/// [`GenerateVerifiable::batch_validate`].
+/// Groups together a proof with the configuration and members set (ring) it was
+/// created against and the context and message it was created for, so that
+/// multiple proofs can be validated in a single batch operation via
+/// [`GenerateVerifiable::batch_validate`]. Each item carries its own `config`
+/// and `members`, so a single batch may mix proofs from different rings, even
+/// rings of different sizes.
 #[derive(Clone)]
-pub struct BatchProofItem<Proof> {
+pub struct BatchProofItem<Proof, Members, Config> {
 	/// The ring VRF proof to validate.
 	pub proof: Proof,
+	/// The configuration (e.g. ring domain size) the proof was created under.
+	pub config: Config,
+	/// The members set (ring) the proof was created against.
+	pub members: Members,
 	/// The context under which the proof was created.
 	pub context: Vec<u8>,
 	/// The message that was signed.
 	pub message: Vec<u8>,
 }
+
+/// [`BatchProofItem`] specialized to a given [`GenerateVerifiable`] implementation `V`.
+pub type BatchProofItemFor<V> = BatchProofItem<
+	<V as GenerateVerifiable>::Proof,
+	<V as GenerateVerifiable>::Members,
+	<V as GenerateVerifiable>::Config,
+>;
 
 // The trait. This (alone) must be implemented in its entirely by the Ring-VRF.
 
@@ -360,16 +374,18 @@ pub trait GenerateVerifiable {
 	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
 	/// in order of input.
 	///
+	/// Each [`BatchProofItem`] carries its own `config` and `members` set, so the
+	/// proofs in a batch may come from different rings, even rings of different
+	/// sizes.
+	///
 	/// Currently only supports single-context proofs. Multi-context proofs should be
 	/// validated individually via [`Self::validate_multi_context`].
-	fn batch_validate(
-		config: Self::Config,
-		members: &Self::Members,
-		proofs: &[BatchProofItem<Self::Proof>],
-	) -> Result<Vec<Alias>, Error> {
+	fn batch_validate(proofs: &[BatchProofItemFor<Self>]) -> Result<Vec<Alias>, Error> {
 		proofs
 			.iter()
-			.map(|item| Self::validate(config, &item.proof, members, &item.context, &item.message))
+			.map(|item| {
+				Self::validate(item.config, &item.proof, &item.members, &item.context, &item.message)
+			})
 			.collect()
 	}
 
