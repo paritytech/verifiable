@@ -744,6 +744,14 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	// built from the item's own domain size and ring commitment, so the PIOP
 	// domain baked into each accumulated item is the one its proof was made under.
 	fn batch_validate(proofs: &[BatchProofItemFor<Self>]) -> Result<Vec<Alias>, Error> {
+		struct Cache<'a, S: RingSuiteExt> {
+			config: RingDomainSize,
+			members: &'a MembersCommitment<S>,
+			verifier: ark_vrf::ring::RingVerifier<S>,
+		}
+		// Reused across consecutive items that share a ring; see `CachedRingVerifier`.
+		let mut cache: Option<Cache<'_, S>> = None;
+
 		let mut aliases = Vec::with_capacity(proofs.len());
 		// Seeded lazily from the first item's verifier; the KZG verifier key it
 		// extracts is shared by every ring regardless of domain size.
@@ -756,9 +764,19 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			message,
 		} in proofs
 		{
-			ensure_canonical_verifier_key::<S>(members)?;
-			let verifier_context = S::VerifierCache::ring_context(*config);
-			let verifier = verifier_context.ring_verifier(members.0.clone());
+			if !matches!(&cache, Some(c) if c.config == *config && c.members == members) {
+				ensure_canonical_verifier_key::<S>(members)?;
+				let verifier_context = S::VerifierCache::ring_context(*config);
+				cache = Some(Cache {
+					config: *config,
+					members,
+					verifier: verifier_context.ring_verifier(members.0.clone()),
+				});
+			}
+			let verifier = &cache
+				.as_ref()
+				.expect("populated on the first item and on each ring change")
+				.verifier;
 
 			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
@@ -775,9 +793,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 			let io = VrfIo { input, output };
 			let batch_verifier = batch_verifier
-				.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(&verifier));
+				.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
 			batch_verifier
-				.push(&verifier, [io], message, &signature.proof)
+				.push(verifier, [io], message, &signature.proof)
 				.map_err(|_| Error::VerificationFailed)?;
 		}
 		match batch_verifier {
