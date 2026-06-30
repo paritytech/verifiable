@@ -21,7 +21,9 @@ The [`Verifiable`] trait defines the full API:
   and alias(es).
 - **Proof validation**: `validate` / `validate_multi_context` verify a proof
   and return the alias(es). `batch_validate` verifies multiple independent proofs
-  efficiently.
+  efficiently in a single batched check; each `BatchProofItem` carries its own
+  config and members, so a batch may mix proofs from different rings, even rings
+  of different sizes.
 - **Plain signatures**: `sign` / `verify_signature` for non-anonymous signatures
   attributable to a specific member.
 

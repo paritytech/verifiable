@@ -735,29 +735,49 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		Ok(aliases)
 	}
 
-	// In order to support ulti ring batch verification we need to:
-	// 1. build the verifier from verifier params with bigger domain size
-	//    - We need the one build from the longer SRS
-	// 2. maintain a list of caches (one for each verifier key)
-	//    - the loop below needs to build the `verifier` using the appropriate verifier key
-	fn batch_validate(
-		config: Self::Config,
-		members: &Self::Members,
-		proofs: &[BatchProofItem<Self::Proof>],
-	) -> Result<Vec<Alias>, Error> {
-		ensure_canonical_verifier_key::<S>(members)?;
-
-		let verifier_context = S::VerifierCache::ring_context(config);
-		let verifier = verifier_context.ring_verifier(members.0.clone());
+	// Multi-ring batch verification. Each item carries its own `config` and
+	// `members`, so the proofs may come from different rings, even rings of
+	// different sizes. The only shared requirement is the KZG SRS, which is the
+	// same across all domain sizes for a suite. `ark_vrf`'s `BatchVerifier`
+	// accumulates the proofs into a single pairing check seeded once with that
+	// shared KZG verifier key; each proof is pushed with a per-item `RingVerifier`
+	// built from the item's own domain size and ring commitment, so the PIOP
+	// domain baked into each accumulated item is the one its proof was made under.
+	fn batch_validate(proofs: &[BatchProofItemFor<Self>]) -> Result<Vec<Alias>, Error> {
+		struct Cache<'a, S: RingSuiteExt> {
+			config: RingDomainSize,
+			members: &'a MembersCommitment<S>,
+			verifier: ark_vrf::ring::RingVerifier<S>,
+		}
+		// Reused across consecutive items that share a ring; see `CachedRingVerifier`.
+		let mut cache: Option<Cache<'_, S>> = None;
 
 		let mut aliases = Vec::with_capacity(proofs.len());
-		let mut batch_verifier = ark_vrf::ring::BatchVerifier::<S>::new(&verifier);
+		// Seeded lazily from the first item's verifier; the KZG verifier key it
+		// extracts is shared by every ring regardless of domain size.
+		let mut batch_verifier: Option<ark_vrf::ring::BatchVerifier<S>> = None;
 		for BatchProofItem {
 			proof,
+			config,
+			members,
 			context,
 			message,
 		} in proofs
 		{
+			if !matches!(&cache, Some(c) if c.config == *config && c.members == members) {
+				ensure_canonical_verifier_key::<S>(members)?;
+				let verifier_context = S::VerifierCache::ring_context(*config);
+				cache = Some(Cache {
+					config: *config,
+					members,
+					verifier: verifier_context.ring_verifier(members.0.clone()),
+				});
+			}
+			let verifier = &cache
+				.as_ref()
+				.expect("populated on the first item and on each ring change")
+				.verifier;
+
 			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
 			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 			let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
@@ -772,14 +792,20 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			aliases.push(make_alias(&output));
 
 			let io = VrfIo { input, output };
+			let batch_verifier = batch_verifier
+				.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
 			batch_verifier
-				.push(&verifier, [io], message, &signature.proof)
+				.push(verifier, [io], message, &signature.proof)
 				.map_err(|_| Error::VerificationFailed)?;
 		}
-		if batch_verifier.verify().is_ok() {
-			return Ok(aliases);
+		match batch_verifier {
+			Some(batch_verifier) => batch_verifier
+				.verify()
+				.map(|_| aliases)
+				.map_err(|_| Error::VerificationFailed),
+			// Empty batch: vacuously valid, no aliases.
+			None => Ok(aliases),
 		}
-		Err(Error::VerificationFailed)
 	}
 
 	#[cfg(feature = "prover")]
