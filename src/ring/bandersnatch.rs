@@ -90,7 +90,7 @@ impl RingSuiteExt for ark_vrf::suites::bandersnatch::BandersnatchSha512Ell2 {
 
 	const PUBLIC_KEY_SIZE: usize = 32;
 	const MEMBERS_SET_SIZE: usize = 848;
-	const MEMBERS_COMMITMENT_SIZE: usize = 768;
+	const MEMBERS_COMMITMENT_SIZE: usize = 288;
 	const STATIC_CHUNK_SIZE: usize = 96;
 	const SIGNATURE_SIZE: usize = 64;
 	const RING_PROOF_SIZE: usize = 752;
@@ -1267,13 +1267,13 @@ mod builder_tests {
 		assert!(matches!(res, Err(crate::Error::InvalidMember)));
 	}
 
-	// Regression for the trusted-setup pinning fix.
-	// `MembersCommitment` carries its own KZG verifier key, so a member set built
-	// under an attacker-chosen SRS must be rejected by validation logic.
-	// Without the pin the attacker proof below verifies as membership; with it,
-	// the non-canonical root is refused before the pairing check is ever reached.
+	// `MembersCommitment` holds only the ring commitment; verification always
+	// rebuilds the verifier key with the suite's canonical KZG key. A commitment
+	// computed under an attacker-chosen SRS, together with a proof valid under
+	// that SRS, must therefore be rejected: paired with the canonical KZG key it
+	// fails the pairing check.
 	#[test]
-	fn validate_rejects_non_canonical_verifier_key() {
+	fn validate_rejects_foreign_srs_commitment() {
 		use ark_vrf::ring::{Prover, RingSetup};
 
 		type S = BandersnatchSha512Ell2;
@@ -1314,7 +1314,7 @@ mod builder_tests {
 		);
 
 		// Attacker setup: a structured reference string from a seed of their
-		// choosing, so the embedded KZG verifier key is not the canonical one.
+		// choosing, so the ring commitment below is computed under a foreign SRS.
 		let ring_size = domain_size.max_ring_size::<S>();
 		let attacker_setup = RingSetup::<S>::from_seed(ring_size, [0xAB; 32]);
 		let pks: Vec<_> = member_keys
@@ -1322,9 +1322,9 @@ mod builder_tests {
 			.map(|m| crate::ring::decode_member::<S>(m.as_ref()).unwrap().0)
 			.collect();
 
-		// Attacker root: same members, but the verifier key is for the attacker SRS.
+		// Attacker root: same members, but the commitment is for the attacker SRS.
 		let attacker_members =
-			crate::ring::MembersCommitment(attacker_setup.verifier_key(&pks).unwrap());
+			crate::ring::MembersCommitment(attacker_setup.verifier_key(&pks).unwrap().commitment());
 
 		// It differs from the canonical root for the same members.
 		assert_ne!(canonical_members.encode(), attacker_members.encode());
@@ -1353,8 +1353,8 @@ mod builder_tests {
 		let attacker_proof: <BandersnatchVrfVerifiable as GenerateVerifiable>::Proof =
 			bounded_collections::BoundedVec::try_from(buf).unwrap();
 
-		// The non-canonical root is rejected on the verifier-key check, for both the
-		// single and batch verification paths, regardless of the proof supplied.
+		// The foreign-SRS root is rejected at the pairing check, for both the
+		// single and batch verification paths.
 		assert_eq!(
 			BandersnatchVrfVerifiable::validate(
 				domain_size,

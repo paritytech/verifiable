@@ -169,8 +169,9 @@ pub trait VerifierCache<S: RingSuiteExt> {
 		Cow::Owned(make_ring_context(domain_size))
 	}
 
-	/// The canonical KZG (PCS) verifier params for this suite, as used by the
-	/// verifier-key pinning check in `validate`/`batch_validate`.
+	/// The canonical KZG (PCS) verifier params for this suite, used to rebuild
+	/// the ring verifier key from a member set's commitment in
+	/// `validate`/`batch_validate`.
 	///
 	/// The value is domain-size independent so there is a single canonical
 	/// value per suite. The default implementation recomputes it from the
@@ -417,19 +418,22 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersSet<S> {
 /// This is the compact representation used for proof verification. Produced by
 /// [`GenerateVerifiable::finish_members`] from a [`MembersSet`].
 ///
-/// The wrapped [`ark_vrf::ring::RingVerifierKey`] carries not only the ring
-/// commitment but also its own KZG verifier key, i.e. the trusted setup the
-/// membership check runs under. Only the commitment is the caller's to choose:
-/// verification pins the canonical KZG key shipped with the suite and rejects any
-/// value whose embedded key differs, so a member set decoded from an untrusted
-/// source can misstate membership but never the cryptographic setup.
+/// The wrapped [`ark_vrf::ring::RingCommitment`] is only the commitment to the
+/// ring's fixed columns; it does not carry a KZG verifier key. The trusted setup
+/// the membership check runs under is never read from this value: verification
+/// rebuilds the [`ark_vrf::ring::RingVerifierKey`] from this commitment and the
+/// canonical KZG verifier key shipped with the suite, via
+/// [`ark_vrf::ring::verifier_key_from_commitment`]. A member set decoded from an
+/// untrusted source can therefore misstate membership but cannot influence the
+/// cryptographic setup at all.
 ///
-/// Note the pin covers only the setup embedded in this value. Whether the
-/// commitment honestly represents the claimed member set still depends on it
-/// having been built from canonical SRS chunks; see the trust requirement on
-/// [`GenerateVerifiable::push_members`].
+/// Whether the commitment honestly represents the claimed member set still
+/// depends on it having been built from canonical SRS chunks; see the trust
+/// requirement on [`GenerateVerifiable::push_members`]. A commitment computed
+/// under a different SRS is not a separate concern here: paired with the
+/// canonical KZG key at verification time it simply fails the pairing check.
 #[derive(CanonicalDeserialize, CanonicalSerialize, Clone)]
-pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingVerifierKey<S>);
+pub struct MembersCommitment<S: RingSuiteExt>(pub(crate) ark_vrf::ring::RingCommitment<S>);
 
 impl_common_traits!(MembersCommitment<S: RingSuiteExt>, S::MEMBERS_COMMITMENT_SIZE);
 
@@ -602,26 +606,22 @@ pub fn make_canonical_pcs_vk<S: RingSuiteExt>() -> ark_vrf::ring::PcsVerifierPar
 		.pcs_verifier_params()
 }
 
-/// Reject a member set whose embedded KZG verifier key is not the canonical one
-/// for this suite.
+/// Build the ring [`ark_vrf::ring::RingVerifier`] for a member set.
 ///
-/// A verifier key rebuilt from the members' own ring commitment and the
-/// canonical params must equal the members value itself; any difference can
-/// only come from a non-canonical embedded key. The comparison goes through
-/// [`MembersCommitment`]'s encode-based `PartialEq`: the wrapped key type's
-/// derived `Eq` carries unsatisfiable bounds on the PCS scheme marker type, so
-/// it cannot be compared directly.
-fn ensure_canonical_verifier_key<S: RingSuiteExt>(
+/// The verifier key is rebuilt from the member set's commitment and the
+/// canonical KZG verifier key shipped with the suite, then bound to the ring
+/// context for `config`. The KZG key is always the suite's canonical one, never
+/// anything carried by the (untrusted) member set, so there is nothing to pin: a
+/// commitment built under a foreign SRS just fails the downstream pairing check.
+fn make_ring_verifier<S: RingSuiteExt>(
+	config: RingDomainSize,
 	members: &MembersCommitment<S>,
-) -> Result<(), Error> {
-	let canonical = MembersCommitment(ark_vrf::ring::verifier_key_from_commitment::<S>(
-		members.0.commitment(),
+) -> ark_vrf::ring::RingVerifier<S> {
+	let verifier_key = ark_vrf::ring::verifier_key_from_commitment::<S>(
+		members.0.clone(),
 		S::VerifierCache::verifier_params(),
-	));
-	if *members != canonical {
-		return Err(Error::VerificationFailed);
-	}
-	Ok(())
+	);
+	S::VerifierCache::ring_context(config).ring_verifier(verifier_key)
 }
 
 /// Generic ring VRF implementation parameterized over the ring suite.
@@ -680,7 +680,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 
 	fn finish_members(intermediate: Self::Intermediate) -> Self::Members {
 		let verifier_key = intermediate.0.finalize();
-		MembersCommitment(verifier_key)
+		MembersCommitment(verifier_key.commitment())
 	}
 
 	fn new_secret(entropy: Entropy) -> Self::Secret {
@@ -703,10 +703,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<AliasVec, Error> {
-		ensure_canonical_verifier_key::<S>(members)?;
-
-		let verifier_context = S::VerifierCache::ring_context(config);
-		let ring_verifier = verifier_context.ring_verifier(members.0.clone());
+		let ring_verifier = make_ring_verifier::<S>(config, members);
 
 		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
 
@@ -765,12 +762,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		} in proofs
 		{
 			if !matches!(&cache, Some(c) if c.config == *config && c.members == members) {
-				ensure_canonical_verifier_key::<S>(members)?;
-				let verifier_context = S::VerifierCache::ring_context(*config);
 				cache = Some(Cache {
 					config: *config,
 					members,
-					verifier: verifier_context.ring_verifier(members.0.clone()),
+					verifier: make_ring_verifier::<S>(*config, members),
 				});
 			}
 			let verifier = &cache
