@@ -384,7 +384,13 @@ pub trait GenerateVerifiable {
 		proofs
 			.iter()
 			.map(|item| {
-				Self::validate(item.config, &item.proof, &item.members, &item.context, &item.message)
+				Self::validate(
+					item.config,
+					&item.proof,
+					&item.members,
+					&item.context,
+					&item.message,
+				)
 			})
 			.collect()
 	}
