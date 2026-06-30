@@ -37,7 +37,8 @@ All changes are relative to 0.2.0, the last published version.
    [#40](https://github.com/paritytech/verifiable/pull/40))
   - Added `create_multi_context`, `validate_multi_context`, `is_valid_multi_context` methods
   - `AliasVec`/`ContextVec` are SmallVec-backed ([#53](https://github.com/paritytech/verifiable/pull/53))
-- **Batch proof validation** ([#26](https://github.com/paritytech/verifiable/pull/26))
+- **Batch proof validation** ([#26](https://github.com/paritytech/verifiable/pull/26),
+  [#61](https://github.com/paritytech/verifiable/pull/61))
   - Added `batch_validate` method and `BatchProofItem` type
 - **Pluggable verifier/prover caches.** `RingSuiteExt` carries `VerifierCache` and
   `ProverCache` associated types (with a `NullCache` no-op impl). The Bandersnatch suite
