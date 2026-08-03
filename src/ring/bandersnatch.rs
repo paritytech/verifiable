@@ -729,10 +729,15 @@ mod builder_tests {
 		println!("* Batch validate {} proofs: {} ms", num_proofs, batch_ms);
 
 		// Verify aliases match
-		assert_eq!(aliases.len(), num_proofs);
-		for (alias, expected) in aliases.iter().zip(expected_aliases.iter()) {
-			assert_eq!(alias, expected);
-		}
+		assert_eq!(aliases, expected_aliases);
+
+		// The per-item variant agrees on an all-valid batch.
+		let results = BandersnatchVrfVerifiable::batch_validate_per_item(&batch_items);
+		assert_eq!(results, aliases.into_iter().map(Ok).collect::<Vec<_>>());
+
+		// An empty batch is vacuously valid for both variants.
+		assert_eq!(BandersnatchVrfVerifiable::batch_validate(&[]), Ok(vec![]));
+		assert!(BandersnatchVrfVerifiable::batch_validate_per_item(&[]).is_empty());
 
 		println!(
 			"* Speedup: {:.2}x",
@@ -740,7 +745,11 @@ mod builder_tests {
 		);
 	});
 
-	test_for_all_domains!(batch_validate_rejects_invalid_proof, |domain_size| {
+	// A junk item is free to produce, so the two batch semantics must both hold:
+	// `batch_validate` rejects the whole batch (all-or-nothing), while
+	// `batch_validate_per_item` attributes the failure to the offending item
+	// without affecting the others.
+	test_for_all_domains!(batch_validate_invalid_items, |domain_size| {
 		use crate::BatchProofItem;
 
 		let context = b"Context";
@@ -767,6 +776,7 @@ mod builder_tests {
 
 		// Create 3 valid proofs
 		let mut batch_items = Vec::new();
+		let mut expected = Vec::new();
 		for i in 0..3 {
 			let member = member_keys[i];
 			let message = format!("Message from member {}", i);
@@ -776,13 +786,14 @@ mod builder_tests {
 				member_keys.clone().into_iter(),
 			)
 			.unwrap();
-			let (proof, _alias) = BandersnatchVrfVerifiable::create(
+			let (proof, alias) = BandersnatchVrfVerifiable::create(
 				commitment,
 				&secrets[i],
 				context,
 				message.as_bytes(),
 			)
 			.unwrap();
+			expected.push(alias);
 			batch_items.push(BatchProofItem {
 				proof,
 				config: domain_size,
@@ -791,21 +802,58 @@ mod builder_tests {
 				message: message.into_bytes(),
 			});
 		}
+		let all_valid: Vec<_> = expected.iter().copied().map(Ok).collect();
 
 		// Sanity: batch with all valid proofs should pass
-		assert!(BandersnatchVrfVerifiable::batch_validate(&batch_items,).is_ok());
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&batch_items),
+			Ok(expected.clone())
+		);
 
 		// Corrupt the proof of the second item by flipping a byte in the proof data
 		let mut corrupted_items = batch_items.clone();
 		corrupted_items[1].proof[10] ^= 0xFF;
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(&corrupted_items,).is_err());
+		assert!(BandersnatchVrfVerifiable::batch_validate(&corrupted_items).is_err());
+		let results = BandersnatchVrfVerifiable::batch_validate_per_item(&corrupted_items);
+		assert!(results[1].is_err());
+		assert_eq!(results[0], all_valid[0]);
+		assert_eq!(results[2], all_valid[2]);
 
-		// Also test with a wrong message on a valid proof
+		// A wrong message on a valid proof decodes fine and only fails the combined
+		// check, so this exercises the bisecting attribution path.
 		let mut wrong_message_items = batch_items.clone();
 		wrong_message_items[2].message = b"tampered message".to_vec();
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(&wrong_message_items,).is_err());
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&wrong_message_items),
+			Err(crate::Error::VerificationFailed)
+		);
+		let results = BandersnatchVrfVerifiable::batch_validate_per_item(&wrong_message_items);
+		assert_eq!(
+			results,
+			vec![
+				all_valid[0],
+				all_valid[1],
+				Err(crate::Error::VerificationFailed)
+			]
+		);
+
+		// Multiple bad items: bisection must descend into both halves.
+		let mut two_bad_items = batch_items.clone();
+		two_bad_items[0].message = b"tampered message".to_vec();
+		two_bad_items[2].message = b"tampered message".to_vec();
+
+		assert!(BandersnatchVrfVerifiable::batch_validate(&two_bad_items).is_err());
+		let results = BandersnatchVrfVerifiable::batch_validate_per_item(&two_bad_items);
+		assert_eq!(
+			results,
+			vec![
+				Err(crate::Error::VerificationFailed),
+				all_valid[1],
+				Err(crate::Error::VerificationFailed)
+			]
+		);
 
 		// Test with a proof from a non-member key.
 		// Generate a new key that is NOT in the ring, create a proof using a ring
@@ -834,7 +882,10 @@ mod builder_tests {
 			message: b"outsider message".to_vec(),
 		});
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(&outsider_items,).is_err());
+		assert!(BandersnatchVrfVerifiable::batch_validate(&outsider_items).is_err());
+		let results = BandersnatchVrfVerifiable::batch_validate_per_item(&outsider_items);
+		assert_eq!(results[..3], all_valid);
+		assert_eq!(results[3], Err(crate::Error::VerificationFailed));
 
 		// Test with a proof created under a different context
 		let wrong_context = b"WrongContext";
@@ -858,7 +909,10 @@ mod builder_tests {
 			message: b"some message".to_vec(),
 		});
 
-		assert!(BandersnatchVrfVerifiable::batch_validate(&wrong_ctx_items,).is_err());
+		assert!(BandersnatchVrfVerifiable::batch_validate(&wrong_ctx_items).is_err());
+		let results = BandersnatchVrfVerifiable::batch_validate_per_item(&wrong_ctx_items);
+		assert_eq!(results[..3], all_valid);
+		assert_eq!(results[3], Err(crate::Error::VerificationFailed));
 	});
 
 	// Each `BatchProofItem` carries its own ring, so a batch may mix proofs from
@@ -923,11 +977,18 @@ mod builder_tests {
 		assert_eq!(aliases, vec![alias_a, alias_b]);
 
 		// Swapping the per-item rings verifies each proof against the wrong ring,
-		// which must fail.
+		// which must fail; the per-item variant attributes both items.
 		let mut swapped = batch.clone();
 		swapped[0].members = members_b;
 		swapped[1].members = members_a;
 		assert!(BandersnatchVrfVerifiable::batch_validate(&swapped).is_err());
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_per_item(&swapped),
+			vec![
+				Err(crate::Error::VerificationFailed),
+				Err(crate::Error::VerificationFailed)
+			]
+		);
 	});
 
 	// A single batch may mix proofs from rings of *different* domain sizes: the
@@ -974,13 +1035,96 @@ mod builder_tests {
 		// Sanity: the batch really spans all three domain sizes.
 		assert_eq!(batch.len(), 3);
 
-		let aliases = BandersnatchVrfVerifiable::batch_validate(&batch).unwrap();
-		assert_eq!(aliases, expected);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&batch),
+			Ok(expected.clone())
+		);
 
-		// Verifying one item under the wrong domain size must fail the whole batch.
+		// Verifying one item under the wrong domain size fails the whole batch;
+		// the per-item variant pins the failure on that item alone.
 		let mut wrong = batch.clone();
 		wrong[0].config = wrong[1].config;
 		assert!(BandersnatchVrfVerifiable::batch_validate(&wrong).is_err());
+		let all_valid: Vec<_> = expected.iter().copied().map(Ok).collect();
+		let results = BandersnatchVrfVerifiable::batch_validate_per_item(&wrong);
+		assert!(results[0].is_err());
+		assert_eq!(results[1..], all_valid[1..]);
+	}
+
+	// Items rejected before entering the combined check (malformed bytes,
+	// unsupported multi-context proofs) short-circuit `batch_validate`, while
+	// `batch_validate_per_item` reports them at their own index with their own
+	// error, leaving the other items' outcomes untouched.
+	#[test]
+	fn batch_validate_per_item_reports_errors() {
+		use crate::BatchProofItem;
+		use bounded_collections::BoundedVec;
+
+		let domain_size = RingDomainSize::Domain11;
+		let context = b"Context";
+		let message = b"msg";
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let secrets: Vec<_> = (0..3)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+			.collect();
+		let member_keys: Vec<_> = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect();
+		let members = build_members(member_keys.iter().copied(), domain_size);
+
+		let commitment = BandersnatchVrfVerifiable::open(
+			domain_size,
+			&member_keys[0],
+			member_keys.iter().copied(),
+		)
+		.unwrap();
+		let (valid_proof, alias) =
+			BandersnatchVrfVerifiable::create(commitment.clone(), &secrets[0], context, message)
+				.unwrap();
+
+		// Valid on its own, but not batchable.
+		let (multi_ctx_proof, _) = BandersnatchVrfVerifiable::create_multi_context(
+			commitment,
+			&secrets[0],
+			&[context.as_slice(), b"other context".as_slice()],
+			message,
+		)
+		.unwrap();
+
+		// Random bytes of the right length, the cheapest junk a submitter can produce.
+		let garbage_proof = BoundedVec::try_from(vec![0xAA; valid_proof.len()]).unwrap();
+
+		let make_item = |proof| BatchProofItem {
+			proof,
+			config: domain_size,
+			members: members.clone(),
+			context: context.to_vec(),
+			message: message.to_vec(),
+		};
+		let batch = vec![
+			make_item(garbage_proof),
+			make_item(valid_proof),
+			make_item(multi_ctx_proof),
+		];
+
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&batch),
+			Err(crate::Error::DecodeError),
+		);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&batch[1..]),
+			Err(crate::Error::Unsupported),
+		);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_per_item(&batch),
+			vec![
+				Err(crate::Error::DecodeError),
+				Ok(alias),
+				Err(crate::Error::Unsupported),
+			],
+		);
 	}
 
 	test_for_all_domains!(open_validate_single_vs_multiple_keys, |domain_size| {
@@ -1235,7 +1379,10 @@ mod builder_tests {
 			context: context.to_vec(),
 			message: message.to_vec(),
 		}];
-		assert!(BandersnatchVrfVerifiable::batch_validate(&batch_items).is_err());
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&batch_items),
+			Err(crate::Error::DecodeError),
+		);
 	}
 
 	// The neutral element passes the subgroup check, so `is_member_valid`
@@ -1376,6 +1523,10 @@ mod builder_tests {
 		assert_eq!(
 			BandersnatchVrfVerifiable::batch_validate(&batch),
 			Err(crate::Error::VerificationFailed),
+		);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_per_item(&batch),
+			vec![Err(crate::Error::VerificationFailed)],
 		);
 	}
 

@@ -1,4 +1,4 @@
-use alloc::{borrow::Cow, vec};
+use alloc::{borrow::Cow, rc::Rc, vec};
 use core::{marker::PhantomData, ops::Range};
 
 pub use ark_vrf;
@@ -624,6 +624,138 @@ fn make_ring_verifier<S: RingSuiteExt>(
 	S::VerifierCache::ring_context(config).ring_verifier(verifier_key)
 }
 
+/// Per-item state retained during batch accumulation, so that a failed
+/// combined check can be attributed by re-verifying sub-batches without
+/// re-parsing the proofs. `verifier` is a handle to the ring verifier of the
+/// item's run, shared with the other items of the same ring; `index` is the
+/// item's position in the caller's slice (and in the results).
+struct BatchEntry<'a, S: RingSuiteExt> {
+	index: usize,
+	verifier: Rc<ark_vrf::ring::RingVerifier<S>>,
+	io: VrfIo<S>,
+	message: &'a [u8],
+	proof: ark_vrf::ring::Proof<S>,
+}
+
+fn verify_sub_batch<S: RingSuiteExt>(entries: &[BatchEntry<'_, S>]) -> bool {
+	let mut batch = ark_vrf::ring::BatchVerifier::<S>::new(&entries[0].verifier);
+	for entry in entries {
+		batch
+			.push(&entry.verifier, entry.io, entry.message, &entry.proof)
+			.expect("push succeeded for the same arguments in the full batch");
+	}
+	batch.verify().is_ok()
+}
+
+/// Attribute a failed combined check to the responsible items.
+///
+/// The combined check is a single randomized linear combination and cannot say
+/// which item broke it, so `entries` (known to fail as a batch) is bisected,
+/// descending only into failing halves: `k` bad items among `n` cost
+/// `O(k*log(n/k))` sub-batch checks instead of `n` individual verifications.
+fn attribute_batch_failure<S: RingSuiteExt>(
+	entries: &[BatchEntry<'_, S>],
+	results: &mut [Result<Alias, Error>],
+) {
+	// Work list of sub-batches known to fail as a batch.
+	let mut failing = vec![entries];
+	while let Some(entries) = failing.pop() {
+		if let [entry] = entries {
+			results[entry.index] = Err(Error::VerificationFailed);
+			continue;
+		}
+		let (left, right) = entries.split_at(entries.len() / 2);
+		let left_ok = verify_sub_batch(left);
+		if !left_ok {
+			failing.push(left);
+		}
+		// A batch of valid proofs always passes (completeness is deterministic),
+		// so a failing set with a passing left half pins the failure on the
+		// right half: checking it would be redundant.
+		if left_ok || !verify_sub_batch(right) {
+			failing.push(right);
+		}
+	}
+}
+
+// Multi-ring batch accumulation shared by `batch_validate` and
+// `batch_validate_per_item`: each proof enters a single combined check via a
+// `RingVerifier` built from its own ring, the KZG SRS being the only shared
+// requirement. Returns the combined verifier, `None` when nothing entered it.
+//
+// `sink` gets one outcome per item, in input order: `Ok` carries the alias
+// (provisional until the combined check passes) and the item's `BatchEntry`;
+// `Err` reports an item that never entered the batch. `exit_on_first_error`
+// stops accumulation at the first `Err`.
+fn accumulate_batch<'a, S: RingSuiteExt>(
+	proofs: &'a [BatchProofItemFor<RingVrfVerifiable<S>>],
+	exit_on_first_error: bool,
+	mut sink: impl FnMut(Result<(Alias, BatchEntry<'a, S>), Error>),
+) -> Option<ark_vrf::ring::BatchVerifier<S>> {
+	let mut verifier: Option<Rc<ark_vrf::ring::RingVerifier<S>>> = None;
+	let mut last_ring: Option<(RingDomainSize, &MembersCommitment<S>)> = None;
+	// Seeded lazily from the first item's verifier; the KZG verifier key it
+	// extracts is shared by every ring regardless of domain size.
+	let mut batch_verifier: Option<ark_vrf::ring::BatchVerifier<S>> = None;
+	let mut process_item = |index, item: &'a BatchProofItemFor<RingVrfVerifiable<S>>| {
+		let BatchProofItem {
+			proof,
+			config,
+			members,
+			context,
+			message,
+		} = item;
+
+		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
+
+		let outputs = signature.outputs.0.as_slice();
+		if outputs.len() != 1 {
+			// The batch verifier only supports single-context proofs.
+			return Err(Error::Unsupported);
+		}
+		let output = outputs[0];
+
+		if last_ring != Some((*config, members)) {
+			verifier = Some(Rc::new(make_ring_verifier::<S>(*config, members)));
+			last_ring = Some((*config, members));
+		}
+		let verifier = verifier
+			.as_ref()
+			.expect("set on the first item and on each ring change");
+
+		let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
+		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
+		let io = VrfIo { input, output };
+
+		let batch_verifier =
+			batch_verifier.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
+		batch_verifier
+			.push(verifier, io, message, &signature.proof)
+			.map_err(|_| Error::VerificationFailed)?;
+
+		Ok((
+			make_alias(&output),
+			BatchEntry {
+				index,
+				verifier: verifier.clone(),
+				io,
+				message,
+				proof: signature.proof,
+			},
+		))
+	};
+
+	for (index, item) in proofs.iter().enumerate() {
+		let outcome = process_item(index, item);
+		let failed = outcome.is_err();
+		sink(outcome);
+		if failed && exit_on_first_error {
+			break;
+		}
+	}
+	batch_verifier
+}
+
 /// Generic ring VRF implementation parameterized over the ring suite.
 ///
 /// The curve params provider is obtained from `S::CurveParams`.
@@ -732,75 +864,51 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		Ok(aliases)
 	}
 
-	// Multi-ring batch verification. Each item carries its own `config` and
-	// `members`, so the proofs may come from different rings, even rings of
-	// different sizes. The only shared requirement is the KZG SRS, which is the
-	// same across all domain sizes for a suite. `ark_vrf`'s `BatchVerifier`
-	// accumulates the proofs into a single pairing check seeded once with that
-	// shared KZG verifier key; each proof is pushed with a per-item `RingVerifier`
-	// built from the item's own domain size and ring commitment, so the PIOP
-	// domain baked into each accumulated item is the one its proof was made under.
+	// All-or-nothing: any per-item error or a failed combined check rejects the
+	// whole batch, so accumulation exits at the first error; the aliases are
+	// collected directly and nothing is retained for attribution, whose cost is
+	// never paid. See `accumulate_batch`.
 	fn batch_validate(proofs: &[BatchProofItemFor<Self>]) -> Result<Vec<Alias>, Error> {
-		struct Cache<'a, S: RingSuiteExt> {
-			config: RingDomainSize,
-			members: &'a MembersCommitment<S>,
-			verifier: ark_vrf::ring::RingVerifier<S>,
-		}
-		// Reused across consecutive items that share a ring; see `CachedRingVerifier`.
-		let mut cache: Option<Cache<'_, S>> = None;
-
 		let mut aliases = Vec::with_capacity(proofs.len());
-		// Seeded lazily from the first item's verifier; the KZG verifier key it
-		// extracts is shared by every ring regardless of domain size.
-		let mut batch_verifier: Option<ark_vrf::ring::BatchVerifier<S>> = None;
-		for BatchProofItem {
-			proof,
-			config,
-			members,
-			context,
-			message,
-		} in proofs
-		{
-			if !matches!(&cache, Some(c) if c.config == *config && c.members == members) {
-				cache = Some(Cache {
-					config: *config,
-					members,
-					verifier: make_ring_verifier::<S>(*config, members),
-				});
-			}
-			let verifier = &cache
-				.as_ref()
-				.expect("populated on the first item and on each ring change")
-				.verifier;
-
-			let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
-			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-			let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
-
-			let outputs = signature.outputs.0.as_slice();
-			if outputs.len() != 1 {
-				// The current batch verifier only supports single-context proofs.
-				return Err(Error::Unsupported);
-			}
-			let output = outputs[0];
-
-			aliases.push(make_alias(&output));
-
-			let io = VrfIo { input, output };
-			let batch_verifier = batch_verifier
-				.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
+		let mut first_error = None;
+		let batch_verifier = accumulate_batch::<S>(proofs, true, |outcome| match outcome {
+			Ok((alias, _)) => aliases.push(alias),
+			Err(error) => first_error = Some(error),
+		});
+		if let Some(error) = first_error {
+			return Err(error);
+		}
+		if let Some(batch_verifier) = batch_verifier {
 			batch_verifier
-				.push(verifier, [io], message, &signature.proof)
+				.verify()
 				.map_err(|_| Error::VerificationFailed)?;
 		}
-		match batch_verifier {
-			Some(batch_verifier) => batch_verifier
+		Ok(aliases)
+	}
+
+	// Per-item: entries are captured during accumulation so that, when the
+	// combined check fails, `attribute_batch_failure` can bisect the batch
+	// without re-parsing the proofs; the all-valid fast path stays a single
+	// combined check. See `accumulate_batch`.
+	fn batch_validate_per_item(proofs: &[BatchProofItemFor<Self>]) -> Vec<Result<Alias, Error>> {
+		let mut results = Vec::with_capacity(proofs.len());
+		let mut entries = Vec::with_capacity(proofs.len());
+		let batch_verifier = accumulate_batch::<S>(proofs, false, |outcome| match outcome {
+			Ok((alias, entry)) => {
+				results.push(Ok(alias));
+				entries.push(entry);
+			}
+			Err(error) => results.push(Err(error)),
+		});
+		if !entries.is_empty()
+			&& batch_verifier
+				.expect("initialized when the first entry was pushed")
 				.verify()
-				.map(|_| aliases)
-				.map_err(|_| Error::VerificationFailed),
-			// Empty batch: vacuously valid, no aliases.
-			None => Ok(aliases),
+				.is_err()
+		{
+			attribute_batch_failure(&entries, &mut results);
 		}
+		results
 	}
 
 	#[cfg(feature = "prover")]

@@ -31,6 +31,13 @@ All changes are relative to 0.2.0, the last published version.
 - **Structured `Error` enum** ([#54](https://github.com/paritytech/verifiable/pull/54))
   - Fallible trait methods return `Error` instead of `()`
 - **Use uncompressed-unchecked codec for trusted domain types** ([#34](https://github.com/paritytech/verifiable/pull/34))
+- **`MembersCommitment` holds only the ring commitment** ([#62](https://github.com/paritytech/verifiable/pull/62))
+  - Wraps `ark_vrf::ring::RingCommitment` instead of `RingVerifierKey`, dropping the
+    embedded KZG verifier key; `MEMBERS_COMMITMENT_SIZE` shrinks from 768 to 288 bytes
+  - Verification rebuilds the verifier key from the commitment and the suite's canonical
+    KZG key via `ark_vrf::ring::verifier_key_from_commitment`, so the trusted setup can no
+    longer be influenced by a decoded member set (the runtime verifier-key pinning check is
+    removed; a commitment built under a foreign SRS now simply fails the pairing check)
 
 ### Added
 - **Multi-context proof creation and validation** ([#37](https://github.com/paritytech/verifiable/pull/37),
@@ -40,6 +47,10 @@ All changes are relative to 0.2.0, the last published version.
 - **Batch proof validation** ([#26](https://github.com/paritytech/verifiable/pull/26),
   [#61](https://github.com/paritytech/verifiable/pull/61))
   - Added `batch_validate` method and `BatchProofItem` type
+  - Added `batch_validate_per_item`, returning one outcome per item for callers batching
+    proofs from untrusted submitters; the ring implementation keeps the single combined
+    check as the fast path and bisects only on failure to attribute it to the offending
+    items (#TODO)
 - **Pluggable verifier/prover caches.** `RingSuiteExt` carries `VerifierCache` and
   `ProverCache` associated types (with a `NullCache` no-op impl). The Bandersnatch suite
   ships static caches so verification does not recompute `PiopParams` on every call
