@@ -301,6 +301,30 @@ impl<S: RingSuiteExt> Get<u32> for MaxRingVrfSignatureLen<S> {
 
 macro_rules! impl_common_traits {
 	($type_name:ident<S: $bound:path>, $size_expr:expr) => {
+		impl_common_traits!($type_name<S: $bound>);
+
+		impl<S: $bound> scale::MaxEncodedLen for $type_name<S> {
+			fn max_encoded_len() -> usize {
+				$size_expr
+			}
+		}
+
+		impl<S: $bound> ark_scale::ArkScaleMaxEncodedLen for $type_name<S> {
+			fn max_encoded_len(_compress: ark_serialize::Compress) -> usize {
+				$size_expr
+			}
+		}
+
+		impl<S: $bound + 'static> scale_info::TypeInfo for $type_name<S> {
+			type Identity = Self;
+			fn type_info() -> scale_info::Type {
+				let mut info = <ark_scale::ArkScale<Self, { UNCOMPRESSED }>>::type_info();
+				info.path = scale_info::Path::new(stringify!($type_name), module_path!());
+				info
+			}
+		}
+	};
+	($type_name:ident<S: $bound:path>) => {
 		impl<S: $bound> Decode for $type_name<S> {
 			fn decode<I: ark_scale::scale::Input>(
 				input: &mut I,
@@ -351,27 +375,6 @@ macro_rules! impl_common_traits {
 		}
 
 		impl<S: $bound> scale::EncodeLike for $type_name<S> {}
-
-		impl<S: $bound> scale::MaxEncodedLen for $type_name<S> {
-			fn max_encoded_len() -> usize {
-				$size_expr
-			}
-		}
-
-		impl<S: $bound> ark_scale::ArkScaleMaxEncodedLen for $type_name<S> {
-			fn max_encoded_len(_compress: ark_serialize::Compress) -> usize {
-				$size_expr
-			}
-		}
-
-		impl<S: $bound + 'static> scale_info::TypeInfo for $type_name<S> {
-			type Identity = Self;
-			fn type_info() -> scale_info::Type {
-				let mut info = <ark_scale::ArkScale<Self, { UNCOMPRESSED }>>::type_info();
-				info.path = scale_info::Path::new(stringify!($type_name), module_path!());
-				info
-			}
-		}
 
 		impl<S: $bound> core::cmp::PartialEq for $type_name<S> {
 			fn eq(&self, other: &Self) -> bool {
@@ -485,7 +488,7 @@ pub struct ProverState<S: RingSuiteExt> {
 	pub(crate) prover_key: ark_vrf::ring::RingProverKey<S>,
 }
 
-impl_common_traits!(ProverState<S: RingSuiteExt>, 0);
+impl_common_traits!(ProverState<S: RingSuiteExt>);
 
 impl<S: RingSuiteExt> core::fmt::Debug for ProverState<S> {
 	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
