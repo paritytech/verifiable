@@ -114,8 +114,8 @@ pub enum Error {
 	VerificationFailed,
 	/// The operation does not support the supplied input.
 	///
-	/// Currently used by `batch_validate` when given a multi-context proof.
-	/// Only single-context proofs are batchable today.
+	/// Currently used by the batch validation methods when given a
+	/// multi-context proof. Only single-context proofs are batchable today.
 	Unsupported,
 }
 
@@ -378,9 +378,44 @@ pub trait GenerateVerifiable {
 	/// proofs in a batch may come from different rings, even rings of different
 	/// sizes.
 	///
+	/// This is all-or-nothing: a single invalid item rejects the whole batch with
+	/// an error that does not identify the offending item, and the worst-case cost
+	/// stays that of one batched check. Appropriate when the batch has a single
+	/// responsible producer (e.g. the proofs of an already-authored block). When
+	/// batching proofs from untrusted submitters, use
+	/// [`Self::batch_validate_per_item`] instead, so one junk submission cannot
+	/// suppress the honest proofs grouped with it.
+	///
 	/// Currently only supports single-context proofs. Multi-context proofs should be
 	/// validated individually via [`Self::validate_multi_context`].
 	fn batch_validate(proofs: &[BatchProofItemFor<Self>]) -> Result<Vec<Alias>, Error> {
+		proofs
+			.iter()
+			.map(|item| {
+				Self::validate(
+					item.config,
+					&item.proof,
+					&item.members,
+					&item.context,
+					&item.message,
+				)
+			})
+			.collect()
+	}
+
+	/// Like [`Self::batch_validate`], but returns one outcome per item, in input
+	/// order, attributing each failure to the item responsible: an invalid,
+	/// malformed, or unsupported item never affects the outcome of the others.
+	///
+	/// Implementations may verify the whole batch in a single combined check and
+	/// pay an extra attribution cost only when that check fails, so a batch with
+	/// invalid items can cost more than [`Self::batch_validate`] on the same
+	/// input. Prefer `batch_validate` when an all-or-nothing verdict suffices and
+	/// the worst-case cost matters.
+	///
+	/// Currently only supports single-context proofs; multi-context proofs are
+	/// reported as [`Error::Unsupported`].
+	fn batch_validate_per_item(proofs: &[BatchProofItemFor<Self>]) -> Vec<Result<Alias, Error>> {
 		proofs
 			.iter()
 			.map(|item| {
