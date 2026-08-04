@@ -7,6 +7,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # `--all-features` is rejected at compile time: `std` (production prover)
+  # and `insecure-deterministic-no-std-prover` (deterministic no_std prover) are
+  # mutually exclusive. Every prover job picks one configuration explicitly.
+  PRODUCTION_FEATURES: mock,builder-params
+  DETERMINISTIC_FEATURES: insecure-deterministic-no-std-prover,builder-params,mock
 
 jobs:
   fmt:
@@ -30,7 +35,8 @@ jobs:
             ~/.cargo/git
             target
           key: clippy-${{ hashFiles('Cargo.lock') }}
-      - run: cargo clippy --all-features --tests -- -D warnings
+      - run: cargo clippy --features ${{ env.PRODUCTION_FEATURES }} --tests -- -D warnings
+      - run: cargo clippy --no-default-features --features ${{ env.DETERMINISTIC_FEATURES }} --tests -- -D warnings
 
   build:
     name: Build
@@ -44,7 +50,9 @@ jobs:
             ~/.cargo/git
             target
           key: build-${{ hashFiles('Cargo.lock') }}
-      - run: cargo build --all-features
+      - run: cargo build --features ${{ env.PRODUCTION_FEATURES }}
+      # `std` + `insecure-deterministic-no-std-prover` must be rejected at compile time.
+      - run: "! cargo build --all-features"
 
   no-std:
     name: Build no-std (wasm32)
@@ -60,6 +68,7 @@ jobs:
             target
           key: wasm-${{ hashFiles('Cargo.lock') }}
       - run: cargo build --target wasm32-unknown-unknown --no-default-features
+      - run: cargo build --target wasm32-unknown-unknown --no-default-features --features ${{ env.DETERMINISTIC_FEATURES }}
 
   test:
     name: Tests
@@ -73,5 +82,5 @@ jobs:
             ~/.cargo/git
             target
           key: test-${{ hashFiles('Cargo.lock') }}
-      - run: cargo test --release --all-features
-
+      - run: cargo test --release --features ${{ env.PRODUCTION_FEATURES }}
+      - run: cargo test --release --no-default-features --features ${{ env.DETERMINISTIC_FEATURES }}

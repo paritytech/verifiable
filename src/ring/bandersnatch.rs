@@ -303,6 +303,35 @@ mod tests {
 		.unwrap();
 		assert_eq!(proof_multi.len(), ring_signature_size::<S>(3));
 	}
+
+	// The ring proof's zero-knowledge blinding must be active in the production
+	// configuration: repeating a proof over identical inputs must give different
+	// bytes (fresh randomness each time). A deterministic proof is a function of
+	// the witness, so the ring member index becomes recoverable from public data
+	// while the proof still verifies (SRLabs finding #710). With
+	// `insecure-deterministic-no-std-prover` blinding is intentionally off and the same
+	// inputs must reproduce the exact same proof. The compile-time feature guards
+	// cannot see an upstream regression (e.g. ring-proof disabling blinding
+	// again); this test does.
+	#[test]
+	fn ring_proof_blinding_regression() {
+		let domain_size = RingDomainSize::Domain11;
+		let secret = BandersnatchVrfVerifiable::new_secret([42; 32]);
+		let member = BandersnatchVrfVerifiable::member_from_secret(&secret);
+		let prove = || {
+			let commitment =
+				BandersnatchVrfVerifiable::open(domain_size, &member, [member].into_iter())
+					.unwrap();
+			BandersnatchVrfVerifiable::create(commitment, &secret, b"ctx", b"msg")
+				.unwrap()
+				.0
+		};
+		let (first, second) = (prove(), prove());
+		#[cfg(not(feature = "insecure-deterministic-no-std-prover"))]
+		assert_ne!(first, second);
+		#[cfg(feature = "insecure-deterministic-no-std-prover")]
+		assert_eq!(first, second);
+	}
 }
 
 #[cfg(test)]
@@ -1130,12 +1159,40 @@ mod builder_tests {
 		}
 	});
 
-	// Regression: decoding a bogus (all-zero) members commitment must fail rather than
-	// producing an invalid object that panics during verification.
+	// Regression: decoding a bogus members commitment must fail rather than
+	// producing an invalid object that panics during verification. Since
+	// arkworks 0.6 the all-zero encoding no longer works as the bogus witness:
+	// the identity is represented as (0, 0), so all-zero bytes decode to a
+	// commitment of identity points, a valid group element. Use a not-on-curve
+	// point instead, and check that the identity commitment, while decodable,
+	// fails verification cleanly.
 	#[test]
 	fn decode_bogus_commitment_fails() {
+		// x = 1, y = 0: not on the curve (y^2 = 0 != x^3 + 4).
+		let mut bad_bytes = vec![0u8; BandersnatchSha512Ell2::MEMBERS_COMMITMENT_SIZE];
+		bad_bytes[0] = 1;
+		assert!(MembersCommitment::decode(&mut &bad_bytes[..]).is_err());
+
 		let zero_bytes = vec![0u8; BandersnatchSha512Ell2::MEMBERS_COMMITMENT_SIZE];
-		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
+		let identity_members = MembersCommitment::decode(&mut &zero_bytes[..]).unwrap();
+
+		let domain_size = RingDomainSize::Domain11;
+		let secret = BandersnatchVrfVerifiable::new_secret([0; 32]);
+		let member = BandersnatchVrfVerifiable::member_from_secret(&secret);
+		let commitment =
+			BandersnatchVrfVerifiable::open(domain_size, &member, [member].into_iter()).unwrap();
+		let (proof, _) =
+			BandersnatchVrfVerifiable::create(commitment, &secret, b"ctx", b"msg").unwrap();
+		assert_eq!(
+			BandersnatchVrfVerifiable::validate(
+				domain_size,
+				&proof,
+				&identity_members,
+				b"ctx",
+				b"msg"
+			),
+			Err(crate::Error::VerificationFailed),
+		);
 	}
 
 	// The `DecodeUnchecked::decode_unchecked` entry point shares the wire format
@@ -1163,13 +1220,15 @@ mod builder_tests {
 	fn decode_unchecked_skips_validation() {
 		use crate::ring::DecodeUnchecked;
 
-		let zero_bytes = vec![0u8; BandersnatchSha512Ell2::MEMBERS_COMMITMENT_SIZE];
+		// x = 1, y = 0: not on the curve (y^2 = 0 != x^3 + 4).
+		let mut bad_bytes = vec![0u8; BandersnatchSha512Ell2::MEMBERS_COMMITMENT_SIZE];
+		bad_bytes[0] = 1;
 
 		// Validated path still rejects (sanity).
-		assert!(MembersCommitment::decode(&mut &zero_bytes[..]).is_err());
+		assert!(MembersCommitment::decode(&mut &bad_bytes[..]).is_err());
 
 		// Unchecked path accepts the same bytes.
-		assert!(MembersCommitment::decode_unchecked(&mut &zero_bytes[..]).is_ok());
+		assert!(MembersCommitment::decode_unchecked(&mut &bad_bytes[..]).is_ok());
 	}
 
 	// A proof with trailing garbage bytes must not be accepted, otherwise the same
@@ -1331,11 +1390,12 @@ mod builder_tests {
 
 		// A ring proof that verifies under the attacker setup (the forgery vehicle),
 		// assembled exactly as `create_multi_context` would, but with the attacker's
-		// prover key.
+		// prover key. Built without blinding: it needs system randomness, unavailable
+		// in the no_std deterministic configuration, and is irrelevant to the
+		// property under test.
 		let prover_key = attacker_setup.prover_key(&pks).unwrap();
-		let ring_prover = attacker_setup
-			.ring_context()
-			.ring_prover(prover_key, prover_idx);
+		let ring_prover = ark_vrf::ring::RingContext::<S>::new_without_blinding(ring_size)
+			.into_ring_prover(prover_key, prover_idx);
 		let input_msg = [<S as RingSuiteExt>::VRF_INPUT_DOMAIN, context].concat();
 		let input = ark_vrf::Input::<S>::new(&input_msg).unwrap();
 		let output = secrets[prover_idx].output(input);
