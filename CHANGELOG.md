@@ -72,6 +72,9 @@ All changes are relative to 0.2.0, the last published version.
   - ark-serialize validation is enabled when decoding types that may come from untrusted sources
 - **Reject trailing bytes when deserializing signatures and proofs** ([#48](https://github.com/paritytech/verifiable/pull/48))
   - Enforces a canonical encoding, preventing malleability via appended bytes
+- **Remove bogus `MaxEncodedLen`/`ArkScaleMaxEncodedLen`/`TypeInfo` impls from `ProverState`**
+  - The impls reported a zero maximum encoded length while real encodings are hundreds of
+    kilobytes; there is no meaningful type-level bound since the size depends on the domain
 - **Reject the identity point in member validation and construction** ([#57](https://github.com/paritytech/verifiable/pull/57))
   - The neutral element passed `is_member_valid` but made `push_members` panic inside the
     ring backend; both paths now reject it with `Error::InvalidMember`
