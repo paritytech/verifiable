@@ -15,8 +15,7 @@ parity-scale-codec = { version = "3.7.4", default-features = false, features = [
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.14", default-features = false }
-# TODO: switch back to a crates.io version once `RingContext::new_without_blinding` is released
-ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "b2eb42bb9f533d5d7607c6960dd0627a37f84f6a", default-features = false, features = ["bandersnatch", "ring"] }
+ark-vrf = { version = "0.5.2", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"] }
 smallvec = { version = "1", default-features = false }
 sha2 = { version = "0.10", default-features = false, optional = true }
