@@ -14,10 +14,9 @@ bounded-collections = { version = "0.3.2", default-features = false, features = 
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
-# TODO: switch back to a crates.io version once 0.0.14 (arkworks 0.6) is released
-ark-scale = { git = "https://github.com/paritytech/ark-scale", rev = "93532caff34ae2af87270a5fafdbd55f69988fdd", default-features = false }
+ark-scale = { version = "0.0.14", default-features = false }
 # TODO: switch back to a crates.io version once `RingContext::new_without_blinding` is released
-ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "0c4a3ef1426fe190fa59da77cf24598b1c9f051e", default-features = false, features = ["bandersnatch", "ring"] }
+ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "b2eb42bb9f533d5d7607c6960dd0627a37f84f6a", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"] }
 smallvec = { version = "1", default-features = false }
 sha2 = { version = "0.10", default-features = false, optional = true }
