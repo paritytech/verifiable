@@ -63,9 +63,30 @@ All changes are relative to 0.2.0, the last published version.
   a reusable `MockMembers` newtype in the `mock` module.
 - **`secret-split` feature**: side-channel resistant secret scalar multiplication,
   bundled into `std` (the only place a production prover runs).
-- **`insecure-deterministic-prover` feature**: deterministic, non-zero-knowledge prover
+- **`insecure-deterministic-no-std-prover` feature**: deterministic, non-zero-knowledge prover
   for `no_std` test environments. Enabling `prover` on `no_std` without it is now a
   compile-time error, since the ring prover has no system RNG there and would panic.
+
+### Security
+- **Feature unification can no longer disable the ring proof's zero-knowledge blinding**
+  (SRLabs audit finding; [ring-proof#93](https://github.com/paritytech/ring-proof/pull/93),
+  [ark-vrf#97](https://github.com/davxy/ark-vrf/pull/97))
+  - `insecure-deterministic-no-std-prover` no longer enables `ark-vrf/test-vectors` (removed
+    upstream): the deterministic prover is selected by building this crate's prover
+    ring context via the new runtime `RingContext::new_without_blinding`, so other
+    `ark-vrf` users in the same build are unaffected
+  - Combining `insecure-deterministic-no-std-prover` with `std` (the production proving
+    configuration) is now a compile-time error, mirroring the existing no_std guard
+  - CI builds and tests both supported prover configurations explicitly instead of
+    `--all-features`; a regression test pins blinding on (production) and off
+    (deterministic prover)
+
+### Changed
+- **arkworks dependencies bumped to 0.6** (required by the upstream changes above).
+  Note: since arkworks 0.6 the identity is represented as `(0, 0)` for short
+  Weierstrass curves, so all-zero uncompressed G1 encodings (e.g. in
+  `MembersCommitment`) decode as valid identity points instead of being rejected;
+  such commitments still fail proof verification cleanly
 
 ### Fixed
 - **Validate curve points on decode to prevent panics** ([#44](https://github.com/paritytech/verifiable/pull/44))

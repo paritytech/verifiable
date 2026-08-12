@@ -13,9 +13,9 @@ exclude = ["src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin"]
 bounded-collections = { version = "0.3.2", default-features = false, features = ["scale-codec"] }
 parity-scale-codec = { version = "3.7.4", default-features = false, features = ["derive","max-encoded-len"] }
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
-ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
-ark-scale = { version = "0.0.13", default-features = false }
-ark-vrf = { version = "0.5.1", default-features = false, features = ["bandersnatch", "ring"] }
+ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
+ark-scale = { version = "0.0.14", default-features = false }
+ark-vrf = { version = "0.5.2", default-features = false, features = ["bandersnatch", "ring"] }
 spin = { version = "0.9", default-features = false, features = ["once"] }
 smallvec = { version = "1", default-features = false }
 sha2 = { version = "0.10", default-features = false, optional = true }
@@ -57,14 +57,14 @@ prover = []
 # test prover does not need it.
 secret-split = ["ark-vrf/secret-split"]
 # Deterministic, NON-ZERO-KNOWLEDGE prover for `no_std`/test environments.
-# DO NOT USE IN PRODUCTION: this enables `ark-vrf/test-vectors`, which zeroes the
-# ring proof's blinding rows instead of sampling randomness. The resulting proofs
-# verify normally but are trivially deanonymizable by a passive observer (the ring
-# member index is recoverable from public data). Exists only so the prover can run
-# in `no_std` without a system RNG, for testing.
-insecure-deterministic-prover = [
+# DO NOT USE IN PRODUCTION: the prover's ring context is built without column
+# blinding, so proofs verify normally but are trivially deanonymizable by a
+# passive observer (the ring member index is recoverable from public data).
+# Exists only so the prover can run in `no_std` without a system RNG, for
+# testing. Rejected at compile time when combined with `std`. Only affects
+# provers built by this crate; other `ark-vrf` users in the build are untouched.
+insecure-deterministic-no-std-prover = [
     "prover",
-    "ark-vrf/test-vectors",
 ]
 # Exposes the `mock` module with a non-cryptographic `Mock` implementation
 # of `GenerateVerifiable`. Intended as a test double for downstream crates
