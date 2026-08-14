@@ -71,12 +71,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The no-std-prover run includes tests/no_std_prover.rs, which builds a
+      # no_std wasm fixture and executes the prover under the wasmi interpreter.
+      - run: rustup target add wasm32-unknown-unknown
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
+            tests/fixtures/wasm-prover/target
           key: test-${{ hashFiles('Cargo.lock') }}
       - run: cargo test --release --features ${{ env.PRODUCTION_FEATURES }}
       - run: cargo test --release --no-default-features --features ${{ env.NO_STD_PROVER_FEATURES }}

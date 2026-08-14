@@ -1,0 +1,18 @@
+[package]
+name = "wasm-prover-fixture"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+verifiable = { path = "../../..", default-features = false, features = ["no-std-prover"] }
+getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+dlmalloc = { version = "0.2", features = ["global"] }
+
+[profile.release]
+panic = "abort"
+
+[workspace]

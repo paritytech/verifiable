@@ -1,2 +1,4 @@
 /target
 /Cargo.lock
+/tests/fixtures/wasm-prover/target
+/tests/fixtures/wasm-prover/Cargo.lock
