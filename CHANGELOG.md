@@ -63,23 +63,22 @@ All changes are relative to 0.2.0, the last published version.
   a reusable `MockMembers` newtype in the `mock` module.
 - **`secret-split` feature**: side-channel resistant secret scalar multiplication,
   bundled into `std` (the only place a production prover runs).
-- **`insecure-deterministic-no-std-prover` feature**: deterministic, non-zero-knowledge prover
-  for `no_std` test environments. Enabling `prover` on `no_std` without it is now a
-  compile-time error, since the ring prover has no system RNG there and would panic.
+- **`no-std-prover` feature**: ring proof generation in `no_std`, with zero-knowledge
+  blinding intact. Blinding randomness is routed through `getrandom`; targets without
+  an OS entropy source (e.g. wasm runtimes) must register a backend with
+  `getrandom::register_custom_getrandom!`, and a missing backend fails at link time.
+  Enabling `prover` on `no_std` without this feature is a compile-time error, since
+  the ring prover would have no randomness source and would panic at proof generation.
 
 ### Security
-- **Feature unification can no longer disable the ring proof's zero-knowledge blinding**
-  (SRLabs audit finding; [ring-proof#93](https://github.com/paritytech/ring-proof/pull/93),
+- **The ring proof's zero-knowledge blinding cannot be disabled**
+  (SRLabs audit finding #710; [ring-proof#93](https://github.com/paritytech/ring-proof/pull/93),
   [ark-vrf#97](https://github.com/davxy/ark-vrf/pull/97))
-  - `insecure-deterministic-no-std-prover` no longer enables `ark-vrf/test-vectors` (removed
-    upstream): the deterministic prover is selected by building this crate's prover
-    ring context via the new runtime `RingContext::new_without_blinding`, so other
-    `ark-vrf` users in the same build are unaffected
-  - Combining `insecure-deterministic-no-std-prover` with `std` (the production proving
-    configuration) is now a compile-time error, mirroring the existing no_std guard
-  - CI builds and tests both supported prover configurations explicitly instead of
-    `--all-features`; a regression test pins blinding on (production) and off
-    (deterministic prover)
+  - A deterministic proof is a function of the witness, so the ring member index
+    becomes recoverable from public data while the proof still verifies
+  - No prover configuration is deterministic: `std` blinds from the system RNG,
+    `no-std-prover` from the embedder's registered `getrandom` backend
+  - A regression test pins blinding on: two proofs over identical inputs must differ
 
 ### Changed
 - **arkworks dependencies bumped to 0.6** (required by the upstream changes above).

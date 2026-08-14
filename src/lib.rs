@@ -1,34 +1,22 @@
 // Unit tests use `std` unconditionally, so keep it linked for test builds of the
-// no_std configurations (e.g. `insecure-deterministic-no-std-prover` without `std`).
+// no_std configurations (e.g. `no-std-prover` without `std`).
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 
-// A production prover needs a system RNG for the ring proof's zero-knowledge
-// blinding (sourced via `getrandom_or_panic` deep in the proving stack). That is
-// only wired up when `std` is enabled; the only no_std prover is the deterministic,
-// non-zero-knowledge one selected by `insecure-deterministic-no-std-prover` (test use
-// only). Any other no_std build with `prover` compiles but panics at proof
+// The ring proof's zero-knowledge blinding draws randomness via
+// `getrandom_or_panic` deep in the proving stack. `std` wires it to the system
+// RNG; `no-std-prover` wires it to `getrandom` (targets without an OS entropy
+// source must register a `getrandom` custom backend, enforced at link time).
+// Without either, a no_std build with `prover` compiles but panics at proof
 // generation, so reject it here instead.
 #[cfg(all(
 	feature = "prover",
 	not(feature = "std"),
-	not(feature = "insecure-deterministic-no-std-prover")
+	not(feature = "no-std-prover")
 ))]
 compile_error!(
-	"`prover` on a no_std target requires the `insecure-deterministic-no-std-prover` feature \
-	 (deterministic, NON-ZERO-KNOWLEDGE, testing only). Without it the ring prover has no \
-	 system RNG and panics during proof generation. Use `std` for production proving."
-);
-
-// Cargo features are additive across the build graph: any crate enabling
-// `insecure-deterministic-no-std-prover` would silently switch every other user of this
-// crate in the same build to the non-zero-knowledge prover. Its proofs verify
-// normally but leak the ring member index, so a `std` build (the production
-// proving configuration) must never carry it.
-#[cfg(all(feature = "std", feature = "insecure-deterministic-no-std-prover"))]
-compile_error!(
-	"`insecure-deterministic-no-std-prover` is a no_std testing prover and must not be combined \
-	 with `std`: it disables the ring proof's zero-knowledge blinding, producing proofs \
-	 that verify normally but are trivially deanonymizable."
+	"`prover` on a no_std target requires the `no-std-prover` feature. Without it the ring \
+	 prover has no randomness source for the zero-knowledge blinding and panics during proof \
+	 generation."
 );
 
 extern crate alloc;
