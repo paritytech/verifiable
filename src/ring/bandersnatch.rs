@@ -304,13 +304,11 @@ mod tests {
 		assert_eq!(proof_multi.len(), ring_signature_size::<S>(3));
 	}
 
-	// The ring proof's zero-knowledge blinding must be active in the production
+	// The ring proof's zero-knowledge blinding must be active in every prover
 	// configuration: repeating a proof over identical inputs must give different
 	// bytes (fresh randomness each time). A deterministic proof is a function of
 	// the witness, so the ring member index becomes recoverable from public data
-	// while the proof still verifies (SRLabs finding #710). With
-	// `insecure-deterministic-no-std-prover` blinding is intentionally off and the same
-	// inputs must reproduce the exact same proof. The compile-time feature guards
+	// while the proof still verifies (SRLabs finding #710). A compile-time guard
 	// cannot see an upstream regression (e.g. ring-proof disabling blinding
 	// again); this test does.
 	#[test]
@@ -327,10 +325,7 @@ mod tests {
 				.0
 		};
 		let (first, second) = (prove(), prove());
-		#[cfg(not(feature = "insecure-deterministic-no-std-prover"))]
 		assert_ne!(first, second);
-		#[cfg(feature = "insecure-deterministic-no-std-prover")]
-		assert_eq!(first, second);
 	}
 }
 

@@ -139,16 +139,7 @@ pub fn make_ring_setup<S: RingSuiteExt>(
 	let pcs_params =
 		ark_vrf::ring::PcsParams::<S>::deserialize_uncompressed_unchecked(data).unwrap();
 	let ring_size = domain_size.max_ring_size::<S>();
-	let setup = ark_vrf::ring::RingSetup::<S>::from_pcs_params(ring_size, pcs_params).unwrap();
-	// Column blinding needs a system RNG, unavailable in no_std. Provers built
-	// from this context produce deterministic, NON-ZERO-KNOWLEDGE proofs, still
-	// valid for verifiers using the regular blinding-enabled context.
-	#[cfg(feature = "insecure-deterministic-no-std-prover")]
-	let setup = ark_vrf::ring::RingSetup {
-		ring_ctx: RingContext::new_without_blinding(ring_size),
-		..setup
-	};
-	setup
+	ark_vrf::ring::RingSetup::<S>::from_pcs_params(ring_size, pcs_params).unwrap()
 }
 
 /// Get ring builder params for the given domain size.

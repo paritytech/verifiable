@@ -51,7 +51,7 @@ supporting up to 16127 members.
 | `prover` | Proof generation (`open`, `create`, `create_multi_context`) |
 | `secret-split` | Side-channel-resistant secret scalar multiplication (masks the secret before EC multiplication). Requires a system RNG, so it is only enabled under `std` |
 | `builder-params` | Includes precomputed ring builder params for building ring commitments |
-| `insecure-deterministic-no-std-prover` | **Insecure, testing only.** Deterministic `no_std` prover whose proofs are trivially deanonymizable (non-zero-knowledge). Rejected at compile time when combined with `std` |
+| `no-std-prover` | Proof generation in `no_std`, with zero-knowledge blinding intact. Blinding randomness goes through `getrandom`; targets without an OS entropy source (e.g. wasm runtimes) must register a backend with `getrandom::register_custom_getrandom!`. A missing backend fails at link time |
 | `mock` | Exposes the `mock` module with a non-cryptographic `Mock` implementation for tests |
 
 For verifier-only builds (e.g. on-chain), disable default features.

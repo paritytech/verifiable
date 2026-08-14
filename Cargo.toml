@@ -7,7 +7,10 @@ authors = ["Parity Technologies <admin@parity.io>"]
 repository = "https://github.com/paritytech/verifiable.git"
 license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 
-exclude = ["src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin"]
+exclude = [
+    "src/ring/data/bls12-381/zcash-srs-2-16-uncompressed.bin",
+    "tests/fixtures",
+]
 
 [dependencies]
 bounded-collections = { version = "0.3.2", default-features = false, features = ["scale-codec"] }
@@ -16,6 +19,12 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.14", default-features = false }
 ark-vrf = { version = "0.5.2", default-features = false, features = ["bandersnatch", "ring"] }
+# Feature-forward only (see `no-std-prover`): `getrandom_or_panic` is the RNG
+# used for ring proof blinding deep in the proving stack (w3f-plonk-common),
+# `getrandom` is its entropy source. Pin `getrandom_or_panic` to the exact
+# version used by w3f-plonk-common so the feature unifies onto that instance.
+getrandom_or_panic = { version = "0.0.3", default-features = false, optional = true }
+getrandom = { version = "0.2", default-features = false, optional = true }
 spin = { version = "0.9", default-features = false, features = ["once"] }
 smallvec = { version = "1", default-features = false }
 sha2 = { version = "0.10", default-features = false, optional = true }
@@ -24,6 +33,13 @@ sha2 = { version = "0.10", default-features = false, optional = true }
 rand = { version = "0.8", features = ["getrandom"] }
 rand_core = "0.6"
 paste = "1.0"
+wasmi = "0.40"
+
+# Runs the prover in a real no_std wasm module (see tests/no_std_prover.rs).
+# Needs the wasm32-unknown-unknown target installed.
+[[test]]
+name = "no_std_prover"
+required-features = ["no-std-prover", "builder-params"]
 
 [[example]]
 name = "generate_test_keys"
@@ -56,15 +72,15 @@ prover = []
 # production prover runs. Bundled into `std` for that reason; the deterministic
 # test prover does not need it.
 secret-split = ["ark-vrf/secret-split"]
-# Deterministic, NON-ZERO-KNOWLEDGE prover for `no_std`/test environments.
-# DO NOT USE IN PRODUCTION: the prover's ring context is built without column
-# blinding, so proofs verify normally but are trivially deanonymizable by a
-# passive observer (the ring member index is recoverable from public data).
-# Exists only so the prover can run in `no_std` without a system RNG, for
-# testing. Rejected at compile time when combined with `std`. Only affects
-# provers built by this crate; other `ark-vrf` users in the build are untouched.
-insecure-deterministic-no-std-prover = [
+# Ring proof generation in `no_std`, with zero-knowledge blinding intact.
+# Routes the blinding randomness through `getrandom`. Targets without an OS
+# entropy source (e.g. wasm runtimes) must register a backend with
+# `getrandom::register_custom_getrandom!`; a missing backend fails at link
+# time, never at run time.
+no-std-prover = [
     "prover",
+    "getrandom_or_panic/getrandom",
+    "getrandom/custom",
 ]
 # Exposes the `mock` module with a non-cryptographic `Mock` implementation
 # of `GenerateVerifiable`. Intended as a test double for downstream crates
