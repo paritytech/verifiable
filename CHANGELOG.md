@@ -2,9 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.5.0]
-
-All changes are relative to 0.2.0, the last published version.
+## [0.3.0]
 
 ### Breaking Changes
 
@@ -50,7 +48,7 @@ All changes are relative to 0.2.0, the last published version.
   - Added `batch_validate_per_item`, returning one outcome per item for callers batching
     proofs from untrusted submitters; the ring implementation keeps the single combined
     check as the fast path and bisects only on failure to attribute it to the offending
-    items (#TODO)
+    items ([#63](https://github.com/paritytech/verifiable/pull/63))
 - **Pluggable verifier/prover caches.** `RingSuiteExt` carries `VerifierCache` and
   `ProverCache` associated types (with a `NullCache` no-op impl). The Bandersnatch suite
   ships static caches so verification does not recompute `PiopParams` on every call
