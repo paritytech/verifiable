@@ -1206,6 +1206,30 @@ mod builder_tests {
 		assert_eq!(inter1, inter2);
 	});
 
+	// A ring larger than the domain allows must be reported as a full set. The member is
+	// present in the ring, so `NotInRing` would send the caller to look for a missing key
+	// instead of to larger parameters. Only the smallest domain is used: the check happens
+	// before any ring construction work, so the larger domains add cost and no coverage.
+	#[test]
+	fn open_with_oversized_ring_reports_set_full() {
+		let domain_size = RingDomainSize::Domain11;
+		let over_capacity = domain_size.max_ring_size::<BandersnatchSha512Ell2>() + 1;
+
+		let members: Vec<_> = (0..over_capacity)
+			.map(|i| {
+				let mut seed = [0u8; 32];
+				seed[..8].copy_from_slice(&(i as u64).to_le_bytes());
+				let secret = BandersnatchVrfVerifiable::new_secret(seed);
+				BandersnatchVrfVerifiable::member_from_secret(&secret)
+			})
+			.collect();
+
+		assert!(matches!(
+			BandersnatchVrfVerifiable::open(domain_size, &members[0], members.iter().copied()),
+			Err(crate::Error::SetFull)
+		));
+	}
+
 	test_for_all_domains!(empty_context_works, |domain_size| {
 		let _ = bandersnatch_ring_setup(domain_size);
 

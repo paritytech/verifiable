@@ -928,7 +928,10 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.ok_or(Error::NotInRing)? as u32;
 		let prover_key = S::ProverCache::ring_setup(config)
 			.prover_key(&pks)
-			.map_err(|_| Error::NotInRing)?;
+			.map_err(|e| match e {
+				ark_vrf::Error::RingCapacityExceeded => Error::SetFull,
+				_ => Error::InvalidMember,
+			})?;
 		Ok(ProverState {
 			domain_size: config.value(),
 			prover_idx,
