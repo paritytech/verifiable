@@ -807,6 +807,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.map_err(|e| match e {
 				ark_vrf::Error::SrsLookupFailed => Error::LookupFailed,
 				ark_vrf::Error::RingCapacityExceeded => Error::SetFull,
+				// The only other failure `append` reports is `InvalidData`, raised for a
+				// key the backend cannot map to Twisted Edwards form.
 				_ => Error::InvalidMember,
 			})
 	}
@@ -930,6 +932,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			.prover_key(&pks)
 			.map_err(|e| match e {
 				ark_vrf::Error::RingCapacityExceeded => Error::SetFull,
+				// The only other failure `prover_key` reports is `InvalidData`, raised
+				// for a key the backend cannot map to Twisted Edwards form.
 				_ => Error::InvalidMember,
 			})?;
 		Ok(ProverState {
