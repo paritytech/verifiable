@@ -801,16 +801,14 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			// reach the MSM and panic. Returning `None` surfaces `Error::LookupFailed`.
 			(items.len() == expected).then_some(items)
 		};
-		// Per `VerifierKeyBuilder::append` docs: `Err(usize::MAX)` signals an
-		// SRS lookup failure; any other `Err(n)` carries the available-slots
-		// count, meaning the ring is too full to accept all the new keys.
-		intermediate.0.append(&keys[..], loader).map_err(|e| {
-			if e == usize::MAX {
-				Error::LookupFailed
-			} else {
-				Error::SetFull
-			}
-		})
+		intermediate
+			.0
+			.append(&keys[..], loader)
+			.map_err(|e| match e {
+				ark_vrf::Error::SrsLookupFailed => Error::LookupFailed,
+				ark_vrf::Error::RingCapacityExceeded => Error::SetFull,
+				_ => Error::InvalidMember,
+			})
 	}
 
 	fn finish_members(intermediate: Self::Intermediate) -> Self::Members {

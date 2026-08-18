@@ -18,7 +18,7 @@ parity-scale-codec = { version = "3.7.4", default-features = false, features = [
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
 ark-scale = { version = "0.0.14", default-features = false }
-ark-vrf = { version = "0.5.2", default-features = false, features = ["bandersnatch", "ring"] }
+ark-vrf = { version = "0.5.3", default-features = false, features = ["bandersnatch", "ring"] }
 # Feature-forward only (see `no-std-prover`): `getrandom_or_panic` is the RNG
 # used for ring proof blinding deep in the proving stack (w3f-plonk-common),
 # `getrandom` is its entropy source. Pin `getrandom_or_panic` to the exact
