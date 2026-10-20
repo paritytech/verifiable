@@ -2,10 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0]
+
+### Changed
+- **ark-vrf bumped to 0.6** ([#68](https://github.com/paritytech/verifiable/pull/68)).
+  The Bandersnatch suite stays at version 1 of `Bandersnatch-SHA512-ELL2`: public keys,
+  aliases and thin signatures keep their 0.3.0 encoding.
+
 ## [0.3.0]
 
 ### Breaking Changes
-
 - **Generic ring VRF implementation** ([#27](https://github.com/paritytech/verifiable/pull/27))
   - `RingVrfVerifiable` is now generic over `RingSuiteExt` instead of being Bandersnatch-specific
   - Introduced `RingSuiteExt`, `RingCurveParams`, `FixedBytes` traits
