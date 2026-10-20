@@ -5,9 +5,8 @@ pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
-	VrfIo,
-	reexports::ark_ec::AffineRepr,
-	ring::{RingContext, RingSuite, Verifier},
+	CanonicalDeserializeExact, VrfIo,
+	ring::{RingContext, RingSuite},
 };
 use bounded_collections::{BoundedVec, Get};
 use parity_scale_codec::{Decode, Encode};
@@ -77,6 +76,7 @@ impl RingDomainSize {
 	/// The max ring that can be handled for both sign/verify at this domain size.
 	pub const fn max_ring_size<S: RingSuite>(self) -> usize {
 		ark_vrf::ring::max_ring_size_from_pcs_domain_size::<S>(self.value() as usize)
+			.expect("every domain size holds at least one key for the supported suites")
 	}
 }
 
@@ -448,17 +448,12 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersCommitment<S> {
 
 pub(crate) type PublicKey<S> = ark_vrf::Public<S>;
 
-/// Decode a member public key, rejecting the neutral element.
+/// Decode a member public key.
 ///
-/// The identity passes the subgroup check but has no affine coordinates, so the
-/// ring backend's `xy().unwrap()` would panic on it during construction. Reject it
-/// here so `is_member_valid` and the construction paths agree.
+/// Checked deserialization in ark-vrf rejects the identity, which has no affine
+/// coordinates and would panic the ring backend's `xy().unwrap()` on append.
 fn decode_member<S: RingSuiteExt>(bytes: &[u8]) -> Result<PublicKey<S>, Error> {
-	let pk = PublicKey::<S>::deserialize_canonical(bytes).map_err(|_| Error::InvalidMember)?;
-	if pk.0.xy().is_none() {
-		return Err(Error::InvalidMember);
-	}
-	Ok(pk)
+	PublicKey::<S>::deserialize_compressed_exact(bytes).map_err(|_| Error::InvalidMember)
 }
 
 /// A chunk of the ring builder's static data (a G1 affine point).
@@ -570,25 +565,6 @@ struct PlainSignature<S: RingSuiteExt> {
 	proof: ark_vrf::thin::Proof<S>,
 }
 
-/// Extension to [`CanonicalDeserialize`] that decodes from a byte slice and
-/// rejects any trailing bytes, enforcing a canonical encoding.
-///
-/// Without this check, valid leading bytes followed by garbage would deserialize
-/// successfully, allowing callers to construct multiple distinct byte arrays
-/// that decode to the same value (signature/proof malleability).
-trait CanonicalDeserializeExt: CanonicalDeserialize {
-	fn deserialize_canonical(bytes: &[u8]) -> Result<Self, Error> {
-		let mut cursor = bytes;
-		let value = Self::deserialize_compressed(&mut cursor).map_err(|_| Error::DecodeError)?;
-		if !cursor.is_empty() {
-			return Err(Error::DecodeError);
-		}
-		Ok(value)
-	}
-}
-
-impl<T: CanonicalDeserialize> CanonicalDeserializeExt for T {}
-
 #[inline(always)]
 fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 	output.hash::<32>()
@@ -644,7 +620,7 @@ fn verify_sub_batch<S: RingSuiteExt>(entries: &[BatchEntry<'_, S>]) -> bool {
 	let mut batch = ark_vrf::ring::BatchVerifier::<S>::new(&entries[0].verifier);
 	for entry in entries {
 		batch
-			.push(&entry.verifier, entry.io, entry.message, &entry.proof)
+			.push(entry.io, entry.message, &entry.proof, &entry.verifier)
 			.expect("push succeeded for the same arguments in the full batch");
 	}
 	batch.verify().is_ok()
@@ -709,7 +685,8 @@ fn accumulate_batch<'a, S: RingSuiteExt>(
 			message,
 		} = item;
 
-		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
+		let signature = RingVrfSignature::<S>::deserialize_compressed_exact(proof.as_slice())
+			.map_err(|_| Error::DecodeError)?;
 
 		let outputs = signature.outputs.0.as_slice();
 		if outputs.len() != 1 {
@@ -733,7 +710,7 @@ fn accumulate_batch<'a, S: RingSuiteExt>(
 		let batch_verifier =
 			batch_verifier.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
 		batch_verifier
-			.push(verifier, io, message, &signature.proof)
+			.push(io, message, &signature.proof, verifier)
 			.map_err(|_| Error::VerificationFailed)?;
 
 		Ok((
@@ -787,7 +764,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		let mut keys = vec![];
 		for member in members {
 			let pk = decode_member::<S>(member.as_ref())?;
-			keys.push(pk.0);
+			keys.push(pk);
 		}
 		let loader = |range: Range<usize>| {
 			let expected = range.len();
@@ -840,7 +817,8 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	) -> Result<AliasVec, Error> {
 		let ring_verifier = make_ring_verifier::<S>(config, members);
 
-		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
+		let signature = RingVrfSignature::<S>::deserialize_compressed_exact(proof.as_slice())
+			.map_err(|_| Error::DecodeError)?;
 
 		let outputs = signature.outputs.0.as_slice();
 		if contexts.len() != outputs.len() {
@@ -861,7 +839,9 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			})
 			.collect();
 
-		ark_vrf::Public::<S>::verify(ios, message, &signature.proof, &ring_verifier)
+		signature
+			.proof
+			.verify(ios, message, &ring_verifier)
 			.map_err(|_| Error::VerificationFailed)?;
 
 		Ok(aliases)
@@ -921,12 +901,12 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		members: impl Iterator<Item = Self::Member>,
 	) -> Result<Self::Commitment, Error> {
 		let pks = members
-			.map(|m| decode_member::<S>(m.as_ref()).map(|pk| pk.0))
+			.map(|m| decode_member::<S>(m.as_ref()))
 			.collect::<Result<Vec<_>, _>>()?;
 		let member = decode_member::<S>(member.as_ref())?;
 		let prover_idx = pks
 			.iter()
-			.position(|&m| m == member.0)
+			.position(|&m| m == member)
 			.ok_or(Error::NotInRing)? as u32;
 		let prover_key = S::ProverCache::ring_setup(config)
 			.prover_key(&pks)
@@ -950,19 +930,19 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		contexts: &[&[u8]],
 		message: &[u8],
 	) -> Result<(Self::Proof, AliasVec), Error> {
-		use ark_vrf::ring::Prover;
 		if contexts.len() > MAX_CONTEXTS {
 			return Err(Error::TooManyContexts);
 		}
 		let domain_size =
 			RingDomainSize::try_from(commitment.domain_size).map_err(|_| Error::DecodeError)?;
 		let ring_setup = S::ProverCache::ring_setup(domain_size);
-		if commitment.prover_idx >= ring_setup.max_ring_size() as u32 {
+		if commitment.prover_idx >= ring_setup.ring_context().max_ring_size() as u32 {
 			return Err(Error::NotInRing);
 		}
 
-		let ring_prover =
-			ring_setup.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
+		let ring_prover = ring_setup
+			.ring_context()
+			.ring_prover(commitment.prover_key, commitment.prover_idx as usize);
 
 		let (ios, aliases, outputs): (ContextVec<_>, AliasVec, ContextVec<_>) = contexts
 			.iter()
@@ -981,7 +961,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			})
 			.collect();
 
-		let proof = secret.prove(ios, message, &ring_prover);
+		let proof = secret.prove_ring(ios, message, &ring_prover);
 
 		let signature = RingVrfSignature::<S> {
 			outputs: RingVrfOutputs(outputs),
@@ -1010,8 +990,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	}
 
 	fn sign(secret: &Self::Secret, message: &[u8]) -> Result<Self::Signature, Error> {
-		use ark_vrf::thin::Prover;
-		let proof = secret.prove([], message);
+		let proof = secret.prove_thin([], message);
 		let signature = PlainSignature::<S> { proof };
 		let mut raw = S::SignatureBytes::ZERO;
 		signature
@@ -1025,13 +1004,13 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		message: &[u8],
 		member: &Self::Member,
 	) -> bool {
-		use ark_vrf::thin::Verifier;
-		let Ok(signature) = PlainSignature::<S>::deserialize_canonical(signature.as_ref()) else {
+		let Ok(signature) = PlainSignature::<S>::deserialize_compressed_exact(signature.as_ref())
+		else {
 			return false;
 		};
 		let Ok(public) = decode_member::<S>(member.as_ref()) else {
 			return false;
 		};
-		public.verify([], message, &signature.proof).is_ok()
+		public.verify_thin([], message, &signature.proof).is_ok()
 	}
 }
