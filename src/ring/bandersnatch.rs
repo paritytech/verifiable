@@ -251,7 +251,7 @@ mod tests {
 	#[test]
 	fn canonical_pcs_vk_matches_srs() {
 		let domain = RingDomainSize::Domain11;
-		let pcs_params = &bandersnatch_ring_setup(domain).pcs_params;
+		let pcs_params = bandersnatch_ring_setup(domain).pcs_params();
 
 		let canonical = crate::ring::make_canonical_pcs_vk::<BandersnatchSha512Ell2>();
 		assert_eq!(canonical.g1, pcs_params.powers_in_g1[0]);
@@ -1499,7 +1499,7 @@ mod builder_tests {
 	// fails the pairing check.
 	#[test]
 	fn validate_rejects_foreign_srs_commitment() {
-		use ark_vrf::ring::{Prover, RingSetup};
+		use ark_vrf::ring::RingSetup;
 
 		type S = BandersnatchSha512Ell2;
 		let domain_size = RingDomainSize::Domain11;
@@ -1541,10 +1541,10 @@ mod builder_tests {
 		// Attacker setup: a structured reference string from a seed of their
 		// choosing, so the ring commitment below is computed under a foreign SRS.
 		let ring_size = domain_size.max_ring_size::<S>();
-		let attacker_setup = RingSetup::<S>::from_seed(ring_size, [0xAB; 32]);
+		let attacker_setup = RingSetup::<S>::from_seed_insecure(ring_size, [0xAB; 32]);
 		let pks: Vec<_> = member_keys
 			.iter()
-			.map(|m| crate::ring::decode_member::<S>(m.as_ref()).unwrap().0)
+			.map(|m| crate::ring::decode_member::<S>(m.as_ref()).unwrap())
 			.collect();
 
 		// Attacker root: same members, but the commitment is for the attacker SRS.
@@ -1566,7 +1566,7 @@ mod builder_tests {
 		let input = ark_vrf::Input::<S>::new(&input_msg).unwrap();
 		let output = secrets[prover_idx].output(input);
 		let io = ark_vrf::VrfIo { input, output };
-		let ring_proof = secrets[prover_idx].prove([io], message, &ring_prover);
+		let ring_proof = secrets[prover_idx].prove_ring([io], message, &ring_prover);
 
 		let mut outputs = crate::ContextVec::new();
 		outputs.push(output);
