@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `GenerateVerifiable::extract_unverified_aliases` reads the aliases of a proof without
+  validating it. The default implementation returns `Error::Unsupported`. The ring VRF
+  implementation hashes the encoded VRF outputs and decodes no point.
+- `GenerateVerifiable::batch_validate_multi_context` and `MultiContextBatchProofItem` validate
+  proofs with any number of contexts in one batch. The ring VRF implementation verifies them in
+  one combined check, like `batch_validate`.
+
+### Changed
+
+- `batch_validate` and `batch_validate_per_item` of the ring VRF implementation report a proof with
+  more than one context as `Error::ContextCountMismatch` instead of `Error::Unsupported`, as
+  `validate` and the default implementations do.
+
 ## [0.3.0]
 
 ### Breaking Changes

@@ -594,6 +594,50 @@ fn make_alias<S: RingSuiteExt>(output: &ark_vrf::Output<S>) -> Alias {
 	output.hash::<32>()
 }
 
+/// Domain separator that `ark-vrf` absorbs before the point in `point_to_hash`.
+///
+/// `ark-vrf` keeps it private (`DomSep::PointToHash`), so it is copied here. The
+/// `alias_from_encoded_output_matches_make_alias` test pins it.
+const POINT_TO_HASH_DOMAIN: u8 = 0x20;
+
+/// The alias of a VRF output, computed from its compressed encoding without
+/// decoding the point.
+///
+/// [`make_alias`] hashes the compressed encoding of the point, so both agree
+/// when `encoded` is canonical. In twisted Edwards compression the only
+/// non-canonical encodings that decode are those of the two points with x = 0
+/// that carry the negative sign flag. This function rejects them.
+fn alias_from_encoded_output<S: RingSuiteExt>(encoded: &[u8]) -> Result<Alias, Error> {
+	use ark_vrf::utils::Transcript;
+
+	if is_negative_zero_x_encoding::<S>(encoded) {
+		return Err(Error::DecodeError);
+	}
+	let mut transcript = S::Transcript::new(S::SUITE_ID);
+	transcript.absorb_raw(&[POINT_TO_HASH_DOMAIN]);
+	transcript.absorb_raw(encoded);
+	let mut alias = [0; 32];
+	transcript.squeeze_raw(&mut alias);
+	Ok(alias)
+}
+
+/// Whether `encoded` is y = 1 or y = -1 with the negative sign flag.
+///
+/// Both decode to a point with x = 0, which re-encodes with the positive flag.
+fn is_negative_zero_x_encoding<S: RingSuiteExt>(encoded: &[u8]) -> bool {
+	use ark_serialize::CanonicalSerializeWithFlags;
+	use ark_vrf::reexports::{ark_ec::twisted_edwards::TEFlags, ark_ff::One};
+
+	type BaseField<S> = <ark_vrf::AffinePoint<S> as AffineRepr>::BaseField;
+
+	let one = BaseField::<S>::one();
+	[one, -one].iter().any(|y| {
+		let mut negative_encoding = vec::Vec::with_capacity(encoded.len());
+		y.serialize_with_flags(&mut negative_encoding, TEFlags::XIsNegative)
+			.is_ok() && negative_encoding == encoded
+	})
+}
+
 /// Recover the canonical KZG (PCS) verifier params from the suite's embedded
 /// empty-ring data.
 ///
@@ -627,6 +671,62 @@ fn make_ring_verifier<S: RingSuiteExt>(
 	S::VerifierCache::ring_context(config).ring_verifier(verifier_key)
 }
 
+/// Borrowed view of a batch item, shared by the single-context and the
+/// multi-context batch methods, so that neither clones its items.
+struct BatchItemRef<'a, S: RingSuiteExt> {
+	proof: &'a [u8],
+	config: RingDomainSize,
+	members: &'a MembersCommitment<S>,
+	contexts: ContextVec<&'a [u8]>,
+	message: &'a [u8],
+}
+
+impl<'a, S: RingSuiteExt> From<&'a BatchProofItemFor<RingVrfVerifiable<S>>>
+	for BatchItemRef<'a, S>
+{
+	fn from(item: &'a BatchProofItemFor<RingVrfVerifiable<S>>) -> Self {
+		Self {
+			proof: item.proof.as_slice(),
+			config: item.config,
+			members: &item.members,
+			contexts: smallvec::smallvec![item.context.as_slice()],
+			message: &item.message,
+		}
+	}
+}
+
+impl<'a, S: RingSuiteExt> From<&'a MultiContextBatchProofItemFor<RingVrfVerifiable<S>>>
+	for BatchItemRef<'a, S>
+{
+	fn from(item: &'a MultiContextBatchProofItemFor<RingVrfVerifiable<S>>) -> Self {
+		Self {
+			proof: item.proof.as_slice(),
+			config: item.config,
+			members: &item.members,
+			contexts: item.contexts.iter().map(Vec::as_slice).collect(),
+			message: &item.message,
+		}
+	}
+}
+
+/// Pair each output with the VRF input of its context and compute its alias.
+///
+/// The caller checks that `contexts` and `outputs` have the same length.
+fn make_ios_and_aliases<S: RingSuiteExt>(
+	contexts: &[&[u8]],
+	outputs: &[ark_vrf::Output<S>],
+) -> (ContextVec<VrfIo<S>>, AliasVec) {
+	contexts
+		.iter()
+		.zip(outputs.iter().copied())
+		.map(|(context, output)| {
+			let input_msg = [S::VRF_INPUT_DOMAIN, context].concat();
+			let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
+			(VrfIo { input, output }, make_alias(&output))
+		})
+		.unzip()
+}
+
 /// Per-item state retained during batch accumulation, so that a failed
 /// combined check can be attributed by re-verifying sub-batches without
 /// re-parsing the proofs. `verifier` is a handle to the ring verifier of the
@@ -635,7 +735,7 @@ fn make_ring_verifier<S: RingSuiteExt>(
 struct BatchEntry<'a, S: RingSuiteExt> {
 	index: usize,
 	verifier: Rc<ark_vrf::ring::RingVerifier<S>>,
-	io: VrfIo<S>,
+	ios: ContextVec<VrfIo<S>>,
 	message: &'a [u8],
 	proof: ark_vrf::ring::Proof<S>,
 }
@@ -644,7 +744,7 @@ fn verify_sub_batch<S: RingSuiteExt>(entries: &[BatchEntry<'_, S>]) -> bool {
 	let mut batch = ark_vrf::ring::BatchVerifier::<S>::new(&entries[0].verifier);
 	for entry in entries {
 		batch
-			.push(&entry.verifier, entry.io, entry.message, &entry.proof)
+			.push(&entry.verifier, &entry.ios[..], entry.message, &entry.proof)
 			.expect("push succeeded for the same arguments in the full batch");
 	}
 	batch.verify().is_ok()
@@ -686,69 +786,66 @@ fn attribute_batch_failure<S: RingSuiteExt>(
 // `RingVerifier` built from its own ring, the KZG SRS being the only shared
 // requirement. Returns the combined verifier, `None` when nothing entered it.
 //
-// `sink` gets one outcome per item, in input order: `Ok` carries the alias
+// `sink` gets one outcome per item, in input order: `Ok` carries the aliases
 // (provisional until the combined check passes) and the item's `BatchEntry`;
 // `Err` reports an item that never entered the batch. `exit_on_first_error`
-// stops accumulation at the first `Err`.
+// stops accumulation at the first `Err`. Each per-item error is the one
+// `validate_multi_context` reports for the same item.
 fn accumulate_batch<'a, S: RingSuiteExt>(
-	proofs: &'a [BatchProofItemFor<RingVrfVerifiable<S>>],
+	items: impl IntoIterator<Item = BatchItemRef<'a, S>>,
 	exit_on_first_error: bool,
-	mut sink: impl FnMut(Result<(Alias, BatchEntry<'a, S>), Error>),
+	mut sink: impl FnMut(Result<(AliasVec, BatchEntry<'a, S>), Error>),
 ) -> Option<ark_vrf::ring::BatchVerifier<S>> {
 	let mut verifier: Option<Rc<ark_vrf::ring::RingVerifier<S>>> = None;
 	let mut last_ring: Option<(RingDomainSize, &MembersCommitment<S>)> = None;
 	// Seeded lazily from the first item's verifier; the KZG verifier key it
 	// extracts is shared by every ring regardless of domain size.
 	let mut batch_verifier: Option<ark_vrf::ring::BatchVerifier<S>> = None;
-	let mut process_item = |index, item: &'a BatchProofItemFor<RingVrfVerifiable<S>>| {
-		let BatchProofItem {
+	let mut process_item = |index, item: BatchItemRef<'a, S>| {
+		let BatchItemRef {
 			proof,
 			config,
 			members,
-			context,
+			contexts,
 			message,
 		} = item;
 
-		let signature = RingVrfSignature::<S>::deserialize_canonical(proof.as_slice())?;
+		let signature = RingVrfSignature::<S>::deserialize_canonical(proof)?;
 
 		let outputs = signature.outputs.0.as_slice();
-		if outputs.len() != 1 {
-			// The batch verifier only supports single-context proofs.
-			return Err(Error::Unsupported);
+		if contexts.len() != outputs.len() {
+			return Err(Error::ContextCountMismatch);
 		}
-		let output = outputs[0];
 
-		if last_ring != Some((*config, members)) {
-			verifier = Some(Rc::new(make_ring_verifier::<S>(*config, members)));
-			last_ring = Some((*config, members));
+		if last_ring != Some((config, members)) {
+			verifier = Some(Rc::new(make_ring_verifier::<S>(config, members)));
+			last_ring = Some((config, members));
 		}
 		let verifier = verifier
 			.as_ref()
 			.expect("set on the first item and on each ring change");
 
-		let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
-		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let io = VrfIo { input, output };
+		let (ios, aliases) = make_ios_and_aliases::<S>(&contexts, outputs);
 
 		let batch_verifier =
 			batch_verifier.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
 		batch_verifier
-			.push(verifier, io, message, &signature.proof)
+			.push(verifier, &ios[..], message, &signature.proof)
 			.map_err(|_| Error::VerificationFailed)?;
 
 		Ok((
-			make_alias(&output),
+			aliases,
 			BatchEntry {
 				index,
 				verifier: verifier.clone(),
-				io,
+				ios,
 				message,
 				proof: signature.proof,
 			},
 		))
 	};
 
-	for (index, item) in proofs.iter().enumerate() {
+	for (index, item) in items.into_iter().enumerate() {
 		let outcome = process_item(index, item);
 		let failed = outcome.is_err();
 		sink(outcome);
@@ -757,6 +854,30 @@ fn accumulate_batch<'a, S: RingSuiteExt>(
 		}
 	}
 	batch_verifier
+}
+
+// All-or-nothing: any per-item error or a failed combined check rejects the
+// whole batch, so accumulation exits at the first error; the aliases are
+// collected directly and nothing is retained for attribution, whose cost is
+// never paid. See `accumulate_batch`.
+fn batch_validate_all<'a, S: RingSuiteExt>(
+	items: impl ExactSizeIterator<Item = BatchItemRef<'a, S>>,
+) -> Result<Vec<AliasVec>, Error> {
+	let mut aliases = Vec::with_capacity(items.len());
+	let mut first_error = None;
+	let batch_verifier = accumulate_batch::<S>(items, true, |outcome| match outcome {
+		Ok((item_aliases, _)) => aliases.push(item_aliases),
+		Err(error) => first_error = Some(error),
+	});
+	if let Some(error) = first_error {
+		return Err(error);
+	}
+	if let Some(batch_verifier) = batch_verifier {
+		batch_verifier
+			.verify()
+			.map_err(|_| Error::VerificationFailed)?;
+	}
+	Ok(aliases)
 }
 
 /// Generic ring VRF implementation parameterized over the ring suite.
@@ -847,19 +968,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 			return Err(Error::ContextCountMismatch);
 		}
 
-		let (ios, aliases): (ContextVec<_>, AliasVec) = contexts
-			.iter()
-			.zip(outputs.iter().copied())
-			.map(|(ctx, output)| {
-				let input_msg = [S::VRF_INPUT_DOMAIN, ctx].concat();
-				let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-
-				let io = VrfIo { input, output };
-				let alias = make_alias(&output);
-
-				(io, alias)
-			})
-			.collect();
+		let (ios, aliases) = make_ios_and_aliases::<S>(contexts, outputs);
 
 		ark_vrf::Public::<S>::verify(ios, message, &signature.proof, &ring_verifier)
 			.map_err(|_| Error::VerificationFailed)?;
@@ -867,26 +976,34 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 		Ok(aliases)
 	}
 
-	// All-or-nothing: any per-item error or a failed combined check rejects the
-	// whole batch, so accumulation exits at the first error; the aliases are
-	// collected directly and nothing is retained for attribution, whose cost is
-	// never paid. See `accumulate_batch`.
+	// Hashes the encoded outputs that follow the fixed-size ring proof. No point
+	// is decoded: the cost is one hash per output.
+	fn extract_unverified_aliases(proof: &Self::Proof) -> Result<AliasVec, Error> {
+		let outputs_bytes = proof
+			.as_slice()
+			.get(S::RING_PROOF_SIZE..)
+			.ok_or(Error::DecodeError)?;
+		let (count, encoded_outputs) = outputs_bytes.split_first().ok_or(Error::DecodeError)?;
+		let count = *count as usize;
+		if count > MAX_CONTEXTS || encoded_outputs.len() != count * S::VRF_OUTPUT_SIZE {
+			return Err(Error::DecodeError);
+		}
+		encoded_outputs
+			.chunks_exact(S::VRF_OUTPUT_SIZE)
+			.map(alias_from_encoded_output::<S>)
+			.collect()
+	}
+
 	fn batch_validate(proofs: &[BatchProofItemFor<Self>]) -> Result<Vec<Alias>, Error> {
-		let mut aliases = Vec::with_capacity(proofs.len());
-		let mut first_error = None;
-		let batch_verifier = accumulate_batch::<S>(proofs, true, |outcome| match outcome {
-			Ok((alias, _)) => aliases.push(alias),
-			Err(error) => first_error = Some(error),
-		});
-		if let Some(error) = first_error {
-			return Err(error);
-		}
-		if let Some(batch_verifier) = batch_verifier {
-			batch_verifier
-				.verify()
-				.map_err(|_| Error::VerificationFailed)?;
-		}
-		Ok(aliases)
+		let aliases = batch_validate_all::<S>(proofs.iter().map(BatchItemRef::from))?;
+		// Each item has one context, so accumulation accepted it with one alias.
+		Ok(aliases.iter().map(|item_aliases| item_aliases[0]).collect())
+	}
+
+	fn batch_validate_multi_context(
+		proofs: &[MultiContextBatchProofItemFor<Self>],
+	) -> Result<Vec<AliasVec>, Error> {
+		batch_validate_all::<S>(proofs.iter().map(BatchItemRef::from))
 	}
 
 	// Per-item: entries are captured during accumulation so that, when the
@@ -896,9 +1013,11 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 	fn batch_validate_per_item(proofs: &[BatchProofItemFor<Self>]) -> Vec<Result<Alias, Error>> {
 		let mut results = Vec::with_capacity(proofs.len());
 		let mut entries = Vec::with_capacity(proofs.len());
-		let batch_verifier = accumulate_batch::<S>(proofs, false, |outcome| match outcome {
-			Ok((alias, entry)) => {
-				results.push(Ok(alias));
+		let items = proofs.iter().map(BatchItemRef::from);
+		let batch_verifier = accumulate_batch::<S>(items, false, |outcome| match outcome {
+			Ok((aliases, entry)) => {
+				// The item has one context, so accumulation accepted it with one alias.
+				results.push(Ok(aliases[0]));
 				entries.push(entry);
 			}
 			Err(error) => results.push(Err(error)),

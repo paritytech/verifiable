@@ -116,8 +116,8 @@ pub enum Error {
 	VerificationFailed,
 	/// The operation does not support the supplied input.
 	///
-	/// Currently used by the batch validation methods when given a
-	/// multi-context proof. Only single-context proofs are batchable today.
+	/// Currently used by the default
+	/// [`GenerateVerifiable::extract_unverified_aliases`].
 	Unsupported,
 }
 
@@ -145,6 +145,33 @@ pub struct BatchProofItem<Proof, Members, Config> {
 
 /// [`BatchProofItem`] specialized to a given [`GenerateVerifiable`] implementation `V`.
 pub type BatchProofItemFor<V> = BatchProofItem<
+	<V as GenerateVerifiable>::Proof,
+	<V as GenerateVerifiable>::Members,
+	<V as GenerateVerifiable>::Config,
+>;
+
+/// A single item in a multi-context batch proof validation request.
+///
+/// Like [`BatchProofItem`], but carries one context per alias of the proof, so
+/// that proofs with any number of contexts can be validated in a single batch
+/// operation via [`GenerateVerifiable::batch_validate_multi_context`].
+#[derive(Clone)]
+pub struct MultiContextBatchProofItem<Proof, Members, Config> {
+	/// The ring VRF proof to validate.
+	pub proof: Proof,
+	/// The configuration (e.g. ring domain size) the proof was created under.
+	pub config: Config,
+	/// The members set (ring) the proof was created against.
+	pub members: Members,
+	/// The contexts under which the proof was created, in the order given at creation.
+	pub contexts: ContextVec<Vec<u8>>,
+	/// The message that was signed.
+	pub message: Vec<u8>,
+}
+
+/// [`MultiContextBatchProofItem`] specialized to a given [`GenerateVerifiable`]
+/// implementation `V`.
+pub type MultiContextBatchProofItemFor<V> = MultiContextBatchProofItem<
 	<V as GenerateVerifiable>::Proof,
 	<V as GenerateVerifiable>::Members,
 	<V as GenerateVerifiable>::Config,
@@ -373,6 +400,17 @@ pub trait GenerateVerifiable {
 		message: &[u8],
 	) -> Result<AliasVec, Error>;
 
+	/// Read the aliases of `proof`, one per context, without validating the proof.
+	///
+	/// For a valid proof they equal the aliases [`Self::validate_multi_context`] returns. They
+	/// carry no guarantee until the proof is validated, for example in a later batch.
+	///
+	/// The default implementation returns [`Error::Unsupported`].
+	fn extract_unverified_aliases(proof: &Self::Proof) -> Result<AliasVec, Error> {
+		let _ = proof;
+		Err(Error::Unsupported)
+	}
+
 	/// Check whether all of the proofs in this batch are valid, returning the `Alias` for each one,
 	/// in order of input.
 	///
@@ -388,8 +426,8 @@ pub trait GenerateVerifiable {
 	/// [`Self::batch_validate_per_item`] instead, so one junk submission cannot
 	/// suppress the honest proofs grouped with it.
 	///
-	/// Currently only supports single-context proofs. Multi-context proofs should be
-	/// validated individually via [`Self::validate_multi_context`].
+	/// A proof with more than one context fails with [`Error::ContextCountMismatch`].
+	/// Use [`Self::batch_validate_multi_context`] to batch such proofs.
 	fn batch_validate(proofs: &[BatchProofItemFor<Self>]) -> Result<Vec<Alias>, Error> {
 		proofs
 			.iter()
@@ -415,8 +453,8 @@ pub trait GenerateVerifiable {
 	/// input. Prefer `batch_validate` when an all-or-nothing verdict suffices and
 	/// the worst-case cost matters.
 	///
-	/// Currently only supports single-context proofs; multi-context proofs are
-	/// reported as [`Error::Unsupported`].
+	/// A proof with more than one context is reported as
+	/// [`Error::ContextCountMismatch`].
 	fn batch_validate_per_item(proofs: &[BatchProofItemFor<Self>]) -> Vec<Result<Alias, Error>> {
 		proofs
 			.iter()
@@ -426,6 +464,32 @@ pub trait GenerateVerifiable {
 					&item.proof,
 					&item.members,
 					&item.context,
+					&item.message,
+				)
+			})
+			.collect()
+	}
+
+	/// Like [`Self::batch_validate`], but each proof may have any number of
+	/// contexts. Returns the aliases of each item, one per context, in input order.
+	///
+	/// The aliases of each item equal those [`Self::validate_multi_context`] returns.
+	fn batch_validate_multi_context(
+		proofs: &[MultiContextBatchProofItemFor<Self>],
+	) -> Result<Vec<AliasVec>, Error> {
+		proofs
+			.iter()
+			.map(|item| {
+				let contexts = item
+					.contexts
+					.iter()
+					.map(Vec::as_slice)
+					.collect::<ContextVec<_>>();
+				Self::validate_multi_context(
+					item.config,
+					&item.proof,
+					&item.members,
+					&contexts,
 					&item.message,
 				)
 			})

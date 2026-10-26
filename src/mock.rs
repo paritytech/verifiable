@@ -248,6 +248,10 @@ impl GenerateVerifiable for Mock {
 		Ok(aliases.iter().copied().collect())
 	}
 
+	fn extract_unverified_aliases(proof: &Self::Proof) -> Result<AliasVec, Error> {
+		Ok(proof.aliases.iter().copied().collect())
+	}
+
 	fn alias_in_context(secret: &Self::Secret, context: &[u8]) -> Result<Alias, Error> {
 		Ok(make_alias(secret, context))
 	}
@@ -398,6 +402,54 @@ mod tests {
 			&swapped,
 			b"msg"
 		));
+	}
+
+	#[cfg(feature = "prover")]
+	#[test]
+	fn extract_unverified_aliases_matches_validation() {
+		let secret = Mock::new_secret([0u8; 32]);
+		let member = Mock::member_from_secret(&secret);
+		let members = make_members(&[secret]);
+
+		let contexts: Vec<&[u8]> = vec![b"ctx1", b"ctx2"];
+		let commitment = Mock::open((), &member, members.iter().cloned()).unwrap();
+		let (proof, aliases) =
+			Mock::create_multi_context(commitment, &secret, &contexts, b"msg").unwrap();
+
+		assert_eq!(Mock::extract_unverified_aliases(&proof).unwrap(), aliases);
+		assert_eq!(
+			Mock::validate_multi_context((), &proof, &members, &contexts, b"msg").unwrap(),
+			aliases,
+		);
+	}
+
+	#[cfg(feature = "prover")]
+	#[test]
+	fn batch_validate_multi_context_works() {
+		let secret = Mock::new_secret([0u8; 32]);
+		let member = Mock::member_from_secret(&secret);
+		let members = make_members(&[secret]);
+
+		let contexts: Vec<&[u8]> = vec![b"ctx1", b"ctx2"];
+		let commitment = Mock::open((), &member, members.iter().cloned()).unwrap();
+		let (proof, aliases) =
+			Mock::create_multi_context(commitment, &secret, &contexts, b"msg").unwrap();
+
+		let item = MultiContextBatchProofItem {
+			proof,
+			config: (),
+			members,
+			contexts: contexts.iter().map(|c| c.to_vec()).collect(),
+			message: b"msg".to_vec(),
+		};
+		assert_eq!(
+			Mock::batch_validate_multi_context(&[item.clone(), item.clone()]),
+			Ok(vec![aliases.clone(), aliases])
+		);
+
+		let mut swapped = item.clone();
+		swapped.contexts.swap(0, 1);
+		assert!(Mock::batch_validate_multi_context(&[item, swapped]).is_err());
 	}
 
 	#[test]

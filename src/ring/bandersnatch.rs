@@ -1075,8 +1075,74 @@ mod builder_tests {
 		assert_eq!(results[1..], all_valid[1..]);
 	}
 
+	// Each item is checked against its own context. Swapping the contexts of two
+	// valid items fails the batch.
+	#[test]
+	fn batch_validate_distinct_contexts() {
+		use crate::BatchProofItem;
+
+		let domain_size = RingDomainSize::Domain11;
+		let message = b"msg";
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let secrets = (0..3)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+			.collect::<Vec<_>>();
+		let keys = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect::<Vec<_>>();
+		let members = build_members(keys.iter().copied(), domain_size);
+
+		let mut batch = Vec::new();
+		let mut expected = Vec::new();
+		for (index, context) in [b"first".as_slice(), b"second".as_slice()]
+			.into_iter()
+			.enumerate()
+		{
+			let commitment =
+				BandersnatchVrfVerifiable::open(domain_size, &keys[index], keys.iter().copied())
+					.unwrap();
+			let (proof, alias) =
+				BandersnatchVrfVerifiable::create(commitment, &secrets[index], context, message)
+					.unwrap();
+			expected.push(alias);
+			batch.push(BatchProofItem {
+				proof,
+				config: domain_size,
+				members: members.clone(),
+				context: context.to_vec(),
+				message: message.to_vec(),
+			});
+		}
+
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&batch),
+			Ok(expected.clone())
+		);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_per_item(&batch),
+			expected.iter().copied().map(Ok).collect::<Vec<_>>()
+		);
+
+		let mut swapped = batch.clone();
+		swapped[0].context = batch[1].context.clone();
+		swapped[1].context = batch[0].context.clone();
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate(&swapped),
+			Err(crate::Error::VerificationFailed)
+		);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_per_item(&swapped),
+			vec![
+				Err(crate::Error::VerificationFailed),
+				Err(crate::Error::VerificationFailed)
+			]
+		);
+	}
+
 	// Items rejected before entering the combined check (malformed bytes,
-	// unsupported multi-context proofs) short-circuit `batch_validate`, while
+	// multi-context proofs) short-circuit `batch_validate`, while
 	// `batch_validate_per_item` reports them at their own index with their own
 	// error, leaving the other items' outcomes untouched.
 	#[test]
@@ -1108,7 +1174,7 @@ mod builder_tests {
 			BandersnatchVrfVerifiable::create(commitment.clone(), &secrets[0], context, message)
 				.unwrap();
 
-		// Valid on its own, but not batchable.
+		// Valid on its own, but it has two outputs for the item's one context.
 		let (multi_ctx_proof, _) = BandersnatchVrfVerifiable::create_multi_context(
 			commitment,
 			&secrets[0],
@@ -1139,16 +1205,346 @@ mod builder_tests {
 		);
 		assert_eq!(
 			BandersnatchVrfVerifiable::batch_validate(&batch[1..]),
-			Err(crate::Error::Unsupported),
+			Err(crate::Error::ContextCountMismatch),
 		);
 		assert_eq!(
 			BandersnatchVrfVerifiable::batch_validate_per_item(&batch),
 			vec![
 				Err(crate::Error::DecodeError),
 				Ok(alias),
-				Err(crate::Error::Unsupported),
+				Err(crate::Error::ContextCountMismatch),
 			],
 		);
+	}
+
+	// Multi-context proofs from rings of different domain sizes, each with its own
+	// number of contexts, share one combined check. Every item gets the aliases
+	// `validate_multi_context` and `extract_unverified_aliases` report for it.
+	#[test]
+	fn batch_validate_multi_context_works() {
+		use crate::{ContextVec, MultiContextBatchProofItem};
+
+		let all_contexts: [&[u8]; 3] = [b"first", b"second", b"third"];
+
+		let mut batch = Vec::new();
+		let mut expected = Vec::new();
+		for domain_size in RingDomainSize::VARIANTS.iter().copied() {
+			let _ = bandersnatch_ring_setup(domain_size);
+
+			let secrets = (0..4)
+				.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+				.collect::<Vec<_>>();
+			let keys = secrets
+				.iter()
+				.map(BandersnatchVrfVerifiable::member_from_secret)
+				.collect::<Vec<_>>();
+			let members = build_members(keys.iter().copied(), domain_size);
+
+			for contexts_count in 1..=all_contexts.len() {
+				let contexts = &all_contexts[..contexts_count];
+				let commitment =
+					BandersnatchVrfVerifiable::open(domain_size, &keys[1], keys.iter().copied())
+						.unwrap();
+				let message = format!("proof at {domain_size:?} with {contexts_count} contexts");
+				let (proof, aliases) = BandersnatchVrfVerifiable::create_multi_context(
+					commitment,
+					&secrets[1],
+					contexts,
+					message.as_bytes(),
+				)
+				.unwrap();
+
+				assert_eq!(
+					BandersnatchVrfVerifiable::validate_multi_context(
+						domain_size,
+						&proof,
+						&members,
+						contexts,
+						message.as_bytes(),
+					),
+					Ok(aliases.clone())
+				);
+				assert_eq!(
+					BandersnatchVrfVerifiable::extract_unverified_aliases(&proof),
+					Ok(aliases.clone())
+				);
+
+				expected.push(aliases);
+				batch.push(MultiContextBatchProofItem {
+					proof,
+					config: domain_size,
+					members: members.clone(),
+					contexts: contexts
+						.iter()
+						.map(|c| c.to_vec())
+						.collect::<ContextVec<_>>(),
+					message: message.into_bytes(),
+				});
+			}
+		}
+
+		assert_eq!(
+			batch.len(),
+			RingDomainSize::VARIANTS.len() * all_contexts.len()
+		);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_multi_context(&batch),
+			Ok(expected)
+		);
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_multi_context(&[]),
+			Ok(Vec::new())
+		);
+	}
+
+	// One bad item rejects the whole multi-context batch with the error
+	// `validate_multi_context` reports for that item alone.
+	#[test]
+	fn batch_validate_multi_context_rejects_bad_item() {
+		use crate::{ContextVec, Error, MultiContextBatchProofItem};
+
+		let domain_size = RingDomainSize::Domain11;
+		let message = b"msg";
+		let contexts: [&[u8]; 2] = [b"first", b"second"];
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let secrets = (0..3)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+			.collect::<Vec<_>>();
+		let keys = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect::<Vec<_>>();
+		let members = build_members(keys.iter().copied(), domain_size);
+		let commitment =
+			BandersnatchVrfVerifiable::open(domain_size, &keys[0], keys.iter().copied()).unwrap();
+		let (proof, aliases) = BandersnatchVrfVerifiable::create_multi_context(
+			commitment,
+			&secrets[0],
+			&contexts,
+			message,
+		)
+		.unwrap();
+
+		let make_item = |contexts: &[&[u8]]| MultiContextBatchProofItem {
+			proof: proof.clone(),
+			config: domain_size,
+			members: members.clone(),
+			contexts: contexts
+				.iter()
+				.map(|c| c.to_vec())
+				.collect::<ContextVec<_>>(),
+			message: message.to_vec(),
+		};
+		let valid = make_item(&contexts);
+
+		let cases: [(&[&[u8]], Error); 5] = [
+			(&[b"second", b"first"], Error::VerificationFailed),
+			(&[b"first", b"other"], Error::VerificationFailed),
+			(&[b"first"], Error::ContextCountMismatch),
+			(
+				&[b"first", b"second", b"third"],
+				Error::ContextCountMismatch,
+			),
+			(&[], Error::ContextCountMismatch),
+		];
+		for (bad_contexts, error) in cases {
+			assert_eq!(
+				BandersnatchVrfVerifiable::validate_multi_context(
+					domain_size,
+					&proof,
+					&members,
+					bad_contexts,
+					message,
+				),
+				Err(error)
+			);
+			let batch = vec![valid.clone(), make_item(bad_contexts), valid.clone()];
+			assert_eq!(
+				BandersnatchVrfVerifiable::batch_validate_multi_context(&batch),
+				Err(error)
+			);
+		}
+
+		assert_eq!(
+			BandersnatchVrfVerifiable::batch_validate_multi_context(&[valid.clone(), valid]),
+			Ok(vec![aliases.clone(), aliases])
+		);
+	}
+
+	#[test]
+	fn extract_unverified_aliases_works() {
+		use bounded_collections::BoundedVec;
+
+		let domain_size = RingDomainSize::Domain11;
+		let message = b"msg";
+		let _ = bandersnatch_ring_setup(domain_size);
+
+		let secrets: Vec<_> = (0..3)
+			.map(|i| BandersnatchVrfVerifiable::new_secret([i as u8; 32]))
+			.collect();
+		let member_keys: Vec<_> = secrets
+			.iter()
+			.map(BandersnatchVrfVerifiable::member_from_secret)
+			.collect();
+		let members = build_members(member_keys.iter().copied(), domain_size);
+		let commitment = BandersnatchVrfVerifiable::open(
+			domain_size,
+			&member_keys[0],
+			member_keys.iter().copied(),
+		)
+		.unwrap();
+
+		// Single context: the aliases equal those of the creation and of the validation.
+		let (proof, alias) =
+			BandersnatchVrfVerifiable::create(commitment.clone(), &secrets[0], b"ctx", message)
+				.unwrap();
+		let extracted = BandersnatchVrfVerifiable::extract_unverified_aliases(&proof).unwrap();
+		assert_eq!(extracted.as_slice(), &[alias]);
+		assert_eq!(
+			BandersnatchVrfVerifiable::validate(domain_size, &proof, &members, b"ctx", message),
+			Ok(alias),
+		);
+
+		// Multi context: one alias per context, in context order.
+		let contexts = [b"ctx".as_slice(), b"other context".as_slice()];
+		let (multi_proof, multi_aliases) = BandersnatchVrfVerifiable::create_multi_context(
+			commitment,
+			&secrets[0],
+			&contexts,
+			message,
+		)
+		.unwrap();
+		assert_eq!(
+			BandersnatchVrfVerifiable::extract_unverified_aliases(&multi_proof).unwrap(),
+			multi_aliases,
+		);
+
+		// A corrupted ring proof still yields the aliases, but fails validation.
+		let mut corrupted = proof.to_vec();
+		corrupted[0] ^= 0x01;
+		let corrupted = BoundedVec::try_from(corrupted).unwrap();
+		assert_eq!(
+			BandersnatchVrfVerifiable::extract_unverified_aliases(&corrupted)
+				.unwrap()
+				.as_slice(),
+			&[alias],
+		);
+		assert!(
+			BandersnatchVrfVerifiable::validate(domain_size, &corrupted, &members, b"ctx", message)
+				.is_err()
+		);
+
+		// A wrong output layout is rejected.
+		let extract = |bytes: Vec<u8>| {
+			let proof = BoundedVec::try_from(bytes).unwrap();
+			BandersnatchVrfVerifiable::extract_unverified_aliases(&proof)
+		};
+		let mut trailing = proof.to_vec();
+		trailing.push(0);
+		assert_eq!(extract(trailing), Err(crate::Error::DecodeError));
+		assert_eq!(
+			extract(proof[..proof.len() - 1].to_vec()),
+			Err(crate::Error::DecodeError),
+		);
+		assert_eq!(
+			extract(proof[..100].to_vec()),
+			Err(crate::Error::DecodeError)
+		);
+		assert_eq!(
+			extract(vec![0xAA; proof.len()]),
+			Err(crate::Error::DecodeError)
+		);
+
+		// An output that is not a curve point still yields an alias, because no point is
+		// decoded, but fails validation.
+		let not_a_point = (0..=u8::MAX)
+			.map(|byte| [byte; 32])
+			.find(|bytes| {
+				ark_vrf::Output::<BandersnatchSha512Ell2>::deserialize_compressed(&bytes[..])
+					.is_err()
+			})
+			.unwrap();
+		let mut bad_output = proof.to_vec();
+		bad_output[<BandersnatchSha512Ell2 as RingSuiteExt>::RING_PROOF_SIZE + 1..]
+			.copy_from_slice(&not_a_point);
+		let bad_output = BoundedVec::try_from(bad_output).unwrap();
+		assert_eq!(
+			BandersnatchVrfVerifiable::extract_unverified_aliases(&bad_output)
+				.unwrap()
+				.len(),
+			1
+		);
+		assert!(
+			BandersnatchVrfVerifiable::validate(
+				domain_size,
+				&bad_output,
+				&members,
+				b"ctx",
+				message
+			)
+			.is_err()
+		);
+	}
+
+	#[test]
+	fn alias_from_encoded_output_matches_make_alias() {
+		use crate::ring::{alias_from_encoded_output, make_alias};
+		use ark_vrf::{AffinePoint, Input, Output};
+
+		// The identity, hashed-to-curve points and their negations, so both sign flags occur.
+		let mut points = vec![AffinePoint::<BandersnatchSha512Ell2>::zero()];
+		for i in 0..16u8 {
+			let point = Input::<BandersnatchSha512Ell2>::new(&[i]).unwrap().0;
+			points.push(point);
+			points.push(-point);
+		}
+		for point in points {
+			let mut encoded = Vec::new();
+			point.serialize_compressed(&mut encoded).unwrap();
+			assert_eq!(
+				alias_from_encoded_output::<BandersnatchSha512Ell2>(&encoded),
+				Ok(make_alias::<BandersnatchSha512Ell2>(&Output(point))),
+			);
+		}
+	}
+
+	#[test]
+	fn negative_zero_x_encodings_are_rejected() {
+		use crate::ring::{alias_from_encoded_output, make_alias};
+		use ark_serialize::{CanonicalSerializeWithFlags, Compress, Validate};
+		use ark_vrf::{
+			AffinePoint, Output,
+			reexports::{
+				ark_ec::{AffineRepr, twisted_edwards::TEFlags},
+				ark_ff::{One, Zero},
+			},
+		};
+		type Point = AffinePoint<BandersnatchSha512Ell2>;
+		type BaseField = <Point as AffineRepr>::BaseField;
+
+		for y in [BaseField::one(), -BaseField::one()] {
+			let mut negative = Vec::new();
+			y.serialize_with_flags(&mut negative, TEFlags::XIsNegative)
+				.unwrap();
+
+			// It decodes to the point with x = 0, which encodes with the positive flag.
+			let point =
+				Point::deserialize_with_mode(&negative[..], Compress::Yes, Validate::No).unwrap();
+			assert!(point.x.is_zero());
+			let mut canonical = Vec::new();
+			point.serialize_compressed(&mut canonical).unwrap();
+			assert_ne!(canonical, negative);
+
+			assert_eq!(
+				alias_from_encoded_output::<BandersnatchSha512Ell2>(&negative),
+				Err(crate::Error::DecodeError),
+			);
+			assert_eq!(
+				alias_from_encoded_output::<BandersnatchSha512Ell2>(&canonical),
+				Ok(make_alias::<BandersnatchSha512Ell2>(&Output(point))),
+			);
+		}
 	}
 
 	test_for_all_domains!(open_validate_single_vs_multiple_keys, |domain_size| {
