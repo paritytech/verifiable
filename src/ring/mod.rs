@@ -718,54 +718,16 @@ fn accumulate_batch<'a, S: RingSuiteExt>(
 	// Seeded lazily from the first item's verifier; the KZG verifier key it
 	// extracts is shared by every ring regardless of domain size.
 	let mut batch_verifier: Option<ark_vrf::ring::BatchVerifier<S>> = None;
-	let mut process_item = |index, item: &'a BatchProofItemFor<RingVrfVerifiable<S>>| {
-		let BatchProofItem {
-			proof,
-			config,
-			members,
-			context,
-			message,
-		} = item;
-
-		let signature = RingVrfSignature::<S>::deserialize_compressed_exact(proof.as_slice())
-			.map_err(|_| Error::DecodeError)?;
-
-		let outputs = signature.outputs.0.as_slice();
-		if outputs.len() != 1 {
-			// The batch verifier only supports single-context proofs.
-			return Err(Error::Unsupported);
-		}
-		let output = outputs[0];
-
-		let verifier = ring_verifier.get(*config, members);
-
-		let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
-		let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-		let io = VrfIo { input, output };
-
-		let batch_verifier =
-			batch_verifier.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
-		batch_verifier
-			.push(io, message, &signature.proof, verifier)
-			.map_err(|_| Error::VerificationFailed)?;
-
-		Ok((
-			make_alias(&output),
-			BatchEntry {
-				index,
-				config: *config,
-				members,
-				io,
-				message,
-				proof: signature.proof,
-			},
-		))
-	};
 
 	let mut ring_order: Vec<usize> = (0..proofs.len()).collect();
 	ring_order.sort_by_cached_key(|&index| (proofs[index].config, &proofs[index].members).encode());
 	for index in ring_order {
-		let outcome = process_item(index, &proofs[index]);
+		let outcome = accumulate_item(
+			index,
+			&proofs[index],
+			&mut ring_verifier,
+			&mut batch_verifier,
+		);
 		let failed = outcome.is_err();
 		sink(index, outcome);
 		if failed && exit_on_first_error {
@@ -773,6 +735,55 @@ fn accumulate_batch<'a, S: RingSuiteExt>(
 		}
 	}
 	batch_verifier
+}
+
+fn accumulate_item<'a, S: RingSuiteExt>(
+	index: usize,
+	item: &'a BatchProofItemFor<RingVrfVerifiable<S>>,
+	ring_verifier: &mut LastRingVerifier<'a, S>,
+	batch_verifier: &mut Option<ark_vrf::ring::BatchVerifier<S>>,
+) -> Result<(Alias, BatchEntry<'a, S>), Error> {
+	let BatchProofItem {
+		proof,
+		config,
+		members,
+		context,
+		message,
+	} = item;
+
+	let signature = RingVrfSignature::<S>::deserialize_compressed_exact(proof.as_slice())
+		.map_err(|_| Error::DecodeError)?;
+
+	let outputs = signature.outputs.0.as_slice();
+	if outputs.len() != 1 {
+		// The batch verifier only supports single-context proofs.
+		return Err(Error::Unsupported);
+	}
+	let output = outputs[0];
+
+	let verifier = ring_verifier.get(*config, members);
+
+	let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
+	let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
+	let io = VrfIo { input, output };
+
+	let batch_verifier =
+		batch_verifier.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
+	batch_verifier
+		.push(io, message, &signature.proof, verifier)
+		.map_err(|_| Error::VerificationFailed)?;
+
+	Ok((
+		make_alias(&output),
+		BatchEntry {
+			index,
+			config: *config,
+			members,
+			io,
+			message,
+			proof: signature.proof,
+		},
+	))
 }
 
 /// Generic ring VRF implementation parameterized over the ring suite.
