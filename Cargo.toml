@@ -41,6 +41,11 @@ wasmi = "0.40"
 name = "no_std_prover"
 required-features = ["no-std-prover", "builder-params"]
 
+# Measures the heap with its own global allocator (see tests/batch_validate_memory.rs).
+[[test]]
+name = "batch_validate_memory"
+required-features = ["prover", "builder-params"]
+
 [[example]]
 name = "generate_test_keys"
 path = "utils/generate_test_keys.rs"
