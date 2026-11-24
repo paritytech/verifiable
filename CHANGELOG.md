@@ -2,14 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.0]
+## [0.4.2] - Unreleased
+
+### Security
+- **Bounded memory in batch validation** ([#71](https://github.com/paritytech/verifiable/pull/71)).
+  `batch_validate_per_item` kept one ring verifier (~8.6 MiB at `Domain16`) alive per ring
+  change, so items that alternate rings made memory grow with the batch. Now one verifier is
+  alive at a time, and items are processed in ring order, so each ring's verifier is built once.
+
+## [0.4.1] - 2026-10-23
+
+### Security
+- **ark-vrf bumped to 0.6.1** ([#69](https://github.com/paritytech/verifiable/pull/69)).
+  In a batch, the KZG randomizer of each ring proof now depends on all the proofs of the batch
+  (w3f-ring-proof 0.0.11). With ark-vrf 0.6.0, a submitter who controls the whole batch can
+  make invalid ring proofs cancel out, so `batch_validate` and `batch_validate_per_item` can
+  accept them. Single proof validation is not affected.
+
+## [0.4.0] - 2026-10-21
 
 ### Changed
 - **ark-vrf bumped to 0.6** ([#68](https://github.com/paritytech/verifiable/pull/68)).
   The Bandersnatch suite stays at version 1 of `Bandersnatch-SHA512-ELL2`: public keys,
   aliases and thin signatures keep their 0.3.0 encoding.
 
-## [0.3.0]
+## [0.3.0] - 2026-08-19
 
 ### Breaking Changes
 - **Generic ring VRF implementation** ([#27](https://github.com/paritytech/verifiable/pull/27))
@@ -105,7 +122,7 @@ All notable changes to this project will be documented in this file.
   - `push_members` also surfaces `Error::LookupFailed` instead of panicking when the
     `lookup` callback returns the wrong number of chunks
 
-## [0.2.0]
+## [0.2.0] - 2025-08-01
 
 ### Added
 - **Add is member valid functionality** ([#23](https://github.com/paritytech/verifiable/pull/23))
@@ -114,3 +131,7 @@ All notable changes to this project will be documented in this file.
 - **Fix panic on invalid keys and invalid signatures** ([#21](https://github.com/paritytech/verifiable/pull/21))
   - Fixed panic that occurred when processing invalid keys and invalid signatures in VRF implementation
   - Removed unused `InternalMember`, `external_member`, and `internal_member` components from the trait `Verifiable`
+
+## [0.1.0] - 2025-04-25
+
+- Initial release.
