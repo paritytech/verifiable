@@ -183,10 +183,9 @@ mod tests {
 		// PUBLIC_KEY_SIZE
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let internal = crate::ring::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(
-			public.as_ref(),
-		)
-		.unwrap();
+		let internal =
+			ark_vrf::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(public.as_ref())
+				.unwrap();
 		assert_eq!(internal.compressed_size(), S::PUBLIC_KEY_SIZE);
 
 		// MEMBERS_SET_SIZE (uncompressed, TRUSTED_SOURCE encoding)
@@ -472,10 +471,9 @@ mod builder_tests {
 	test_for_all_domains!(check_precomputed_size, |domain_size| {
 		let secret = BandersnatchVrfVerifiable::new_secret([0u8; 32]);
 		let public = BandersnatchVrfVerifiable::member_from_secret(&secret);
-		let internal = crate::ring::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(
-			public.as_ref(),
-		)
-		.unwrap();
+		let internal =
+			ark_vrf::PublicKey::<BandersnatchSha512Ell2>::deserialize_compressed(public.as_ref())
+				.unwrap();
 		assert_eq!(
 			internal.compressed_size(),
 			<BandersnatchSha512Ell2 as RingSuiteExt>::PUBLIC_KEY_SIZE
@@ -1565,7 +1563,7 @@ mod builder_tests {
 		let input_msg = [<S as RingSuiteExt>::VRF_INPUT_DOMAIN, context].concat();
 		let input = ark_vrf::Input::<S>::new(&input_msg).unwrap();
 		let output = secrets[prover_idx].output(input);
-		let io = ark_vrf::VrfIo { input, output };
+		let io = ark_vrf::IoPair { input, output };
 		let ring_proof = secrets[prover_idx].prove_ring([io], message, &ring_prover);
 
 		let mut outputs = crate::ContextVec::new();

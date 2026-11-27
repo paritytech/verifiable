@@ -16,3 +16,6 @@ dlmalloc = { version = "0.2", features = ["global"] }
 panic = "abort"
 
 [workspace]
+
+[patch.crates-io]
+ark-vrf = { path = "/mnt/ssd/develop/crypto/ark-vrf" }

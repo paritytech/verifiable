@@ -5,7 +5,7 @@ pub use ark_vrf;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use ark_vrf::{
-	CanonicalDeserializeExact, VrfIo,
+	CanonicalDeserializeExact, IoPair, PublicKey,
 	ring::{RingContext, RingSuite},
 };
 use bounded_collections::{BoundedVec, Get};
@@ -446,8 +446,6 @@ impl<S: RingSuiteExt> core::fmt::Debug for MembersCommitment<S> {
 	}
 }
 
-pub(crate) type PublicKey<S> = ark_vrf::Public<S>;
-
 /// Decode a member public key.
 ///
 /// Checked deserialization in ark-vrf rejects the identity, which has no affine
@@ -648,7 +646,7 @@ struct BatchEntry<'a, S: RingSuiteExt> {
 	index: usize,
 	config: RingDomainSize,
 	members: &'a MembersCommitment<S>,
-	io: VrfIo<S>,
+	io: IoPair<S>,
 	message: &'a [u8],
 	proof: ark_vrf::ring::Proof<S>,
 }
@@ -765,7 +763,7 @@ fn accumulate_item<'a, S: RingSuiteExt>(
 
 	let input_msg = [S::VRF_INPUT_DOMAIN, context.as_slice()].concat();
 	let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
-	let io = VrfIo { input, output };
+	let io = IoPair { input, output };
 
 	let batch_verifier =
 		batch_verifier.get_or_insert_with(|| ark_vrf::ring::BatchVerifier::<S>::new(verifier));
@@ -792,7 +790,7 @@ fn accumulate_item<'a, S: RingSuiteExt>(
 pub struct RingVrfVerifiable<S: RingSuiteExt>(PhantomData<S>);
 
 impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
-	type Secret = ark_vrf::Secret<S>;
+	type Secret = ark_vrf::SecretKey<S>;
 	type Commitment = ProverState<S>;
 	type Members = MembersCommitment<S>;
 	type Intermediate = MembersSet<S>;
@@ -882,7 +880,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 				let input_msg = [S::VRF_INPUT_DOMAIN, ctx].concat();
 				let input = ark_vrf::Input::<S>::new(&input_msg[..]).expect("H2C can't fail here");
 
-				let io = VrfIo { input, output };
+				let io = IoPair { input, output };
 				let alias = make_alias(&output);
 
 				(io, alias)
@@ -1002,7 +1000,7 @@ impl<S: RingSuiteExt> GenerateVerifiable for RingVrfVerifiable<S> {
 				let preout = secret.output(input);
 				let alias = make_alias(&preout);
 
-				let io = VrfIo {
+				let io = IoPair {
 					input,
 					output: preout,
 				};
